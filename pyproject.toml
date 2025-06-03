@@ -38,6 +38,7 @@ tensorflow = ">=2.19.0"
 sqlmodel = ">=0.0.24,<0.0.25"
 asyncpg = "^0.30.0"
 psutil = ">=6.1.1,<7.0.0"
+pytest = "^8.4.0"
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]
