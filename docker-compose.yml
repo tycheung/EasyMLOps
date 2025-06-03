@@ -1,0 +1,196 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:16-alpine
+    container_name: easymlops-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: easymlops
+      POSTGRES_USER: easymlops
+      POSTGRES_PASSWORD: easymlops_dev_password
+      POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256"
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    networks:
+      - easymlops-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U easymlops -d easymlops"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis Cache (for future caching needs)
+  redis:
+    image: redis:7-alpine
+    container_name: easymlops-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes --requirepass easymlops_redis_password
+    volumes:
+      - redis_data:/data
+    networks:
+      - easymlops-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  # EasyMLOps Application
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    container_name: easymlops-app
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      # Database configuration
+      POSTGRES_SERVER: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: easymlops
+      POSTGRES_USER: easymlops
+      POSTGRES_PASSWORD: easymlops_dev_password
+      
+      # Application configuration
+      APP_NAME: "EasyMLOps"
+      APP_VERSION: "1.0.0"
+      DEBUG: "false"
+      LOG_LEVEL: "info"
+      HOST: "0.0.0.0"
+      PORT: 8000
+      RELOAD: "false"
+      
+      # Security
+      SECRET_KEY: "dev-secret-key-change-in-production"
+      
+      # Paths
+      MODELS_DIR: "/app/models"
+      BENTOS_DIR: "/app/bentos"
+      STATIC_DIR: "/app/static"
+      
+      # CORS
+      BACKEND_CORS_ORIGINS: '["http://localhost:3000", "http://localhost:8000", "http://localhost:8080"]'
+      
+      # Redis configuration
+      REDIS_URL: "redis://:easymlops_redis_password@redis:6379/0"
+    volumes:
+      - ./models:/app/models
+      - ./bentos:/app/bentos
+      - ./logs:/app/logs
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - easymlops-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Database Migration Service
+  migration:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    container_name: easymlops-migration
+    environment:
+      POSTGRES_SERVER: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: easymlops
+      POSTGRES_USER: easymlops
+      POSTGRES_PASSWORD: easymlops_dev_password
+    command: ["python", "-m", "alembic", "upgrade", "head"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - easymlops-network
+    restart: "no"
+
+  # Nginx Reverse Proxy (for production-like setup)
+  nginx:
+    image: nginx:alpine
+    container_name: easymlops-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./docker/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./docker/nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./static:/var/www/static:ro
+    depends_on:
+      - app
+    networks:
+      - easymlops-network
+
+  # Prometheus (Monitoring)
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: easymlops-prometheus
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./docker/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=200h'
+      - '--web.enable-lifecycle'
+    networks:
+      - easymlops-network
+
+  # Grafana (Visualization)
+  grafana:
+    image: grafana/grafana:latest
+    container_name: easymlops-grafana
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./docker/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./docker/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      - prometheus
+    networks:
+      - easymlops-network
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  prometheus_data:
+    driver: local
+  grafana_data:
+    driver: local
+
+networks:
+  easymlops-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16 

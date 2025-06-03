@@ -1,0 +1,483 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EasyMLOps - Data Scientist Empowerment Platform</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <link href="css/styles.css" rel="stylesheet">
+    <script src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
+    <style>
+        .gradient-bg {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+        .card-hover:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 25px rgba(0,0,0,0.15);
+        }
+        .upload-zone {
+            border: 2px dashed #cbd5e0;
+            transition: all 0.3s ease;
+        }
+        .upload-zone.dragover {
+            border-color: #667eea;
+            background-color: #f7fafc;
+        }
+        .tab-content {
+            display: none;
+        }
+        .tab-content.active {
+            display: block;
+        }
+        .notification {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 1000;
+            min-width: 300px;
+        }
+    </style>
+</head>
+<body class="bg-gray-50">
+    <!-- Navigation -->
+    <nav class="gradient-bg shadow-lg">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex justify-between h-16">
+                <div class="flex items-center">
+                    <div class="flex-shrink-0">
+                        <h1 class="text-white text-xl font-bold">
+                            <i class="fas fa-robot mr-2"></i>EasyMLOps
+                        </h1>
+                    </div>
+                    <div class="hidden md:ml-6 md:flex md:space-x-8">
+                        <a href="#" onclick="showTab('dashboard')" class="text-white hover:text-gray-200 px-3 py-2 text-sm font-medium">Dashboard</a>
+                        <a href="#" onclick="showTab('upload')" class="text-white hover:text-gray-200 px-3 py-2 text-sm font-medium">Upload Model</a>
+                        <a href="#" onclick="showTab('models')" class="text-white hover:text-gray-200 px-3 py-2 text-sm font-medium">My Models</a>
+                        <a href="#" onclick="showTab('deployments')" class="text-white hover:text-gray-200 px-3 py-2 text-sm font-medium">Deployments</a>
+                        <a href="#" onclick="showTab('test')" class="text-white hover:text-gray-200 px-3 py-2 text-sm font-medium">Test Models</a>
+                    </div>
+                </div>
+                <div class="flex items-center">
+                    <button onclick="window.open('/docs', '_blank')" class="text-white hover:text-gray-200 px-3 py-2 text-sm font-medium">
+                        <i class="fas fa-book mr-1"></i> API Docs
+                    </button>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Main Content -->
+    <div class="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
+        
+        <!-- Dashboard Tab -->
+        <div id="dashboard" class="tab-content active">
+            <div class="px-4 py-6 sm:px-0">
+                <div class="mb-8">
+                    <h2 class="text-3xl font-bold text-gray-900">Welcome to EasyMLOps</h2>
+                    <p class="mt-2 text-gray-600">Deploy your ML models with production-ready APIs in minutes</p>
+                </div>
+
+                <!-- Stats Cards -->
+                <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+                    <div class="bg-white overflow-hidden shadow rounded-lg card-hover transition-all duration-200">
+                        <div class="p-5">
+                            <div class="flex items-center">
+                                <div class="flex-shrink-0">
+                                    <i class="fas fa-brain text-2xl text-blue-600"></i>
+                                </div>
+                                <div class="ml-5 w-0 flex-1">
+                                    <dl>
+                                        <dt class="text-sm font-medium text-gray-500 truncate">Total Models</dt>
+                                        <dd class="text-lg font-medium text-gray-900" id="total-models">-</dd>
+                                    </dl>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="bg-white overflow-hidden shadow rounded-lg card-hover transition-all duration-200">
+                        <div class="p-5">
+                            <div class="flex items-center">
+                                <div class="flex-shrink-0">
+                                    <i class="fas fa-rocket text-2xl text-green-600"></i>
+                                </div>
+                                <div class="ml-5 w-0 flex-1">
+                                    <dl>
+                                        <dt class="text-sm font-medium text-gray-500 truncate">Active Deployments</dt>
+                                        <dd class="text-lg font-medium text-gray-900" id="active-deployments">-</dd>
+                                    </dl>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="bg-white overflow-hidden shadow rounded-lg card-hover transition-all duration-200">
+                        <div class="p-5">
+                            <div class="flex items-center">
+                                <div class="flex-shrink-0">
+                                    <i class="fas fa-chart-line text-2xl text-purple-600"></i>
+                                </div>
+                                <div class="ml-5 w-0 flex-1">
+                                    <dl>
+                                        <dt class="text-sm font-medium text-gray-500 truncate">Predictions Today</dt>
+                                        <dd class="text-lg font-medium text-gray-900" id="predictions-today">-</dd>
+                                    </dl>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="bg-white overflow-hidden shadow rounded-lg card-hover transition-all duration-200">
+                        <div class="p-5">
+                            <div class="flex items-center">
+                                <div class="flex-shrink-0">
+                                    <i class="fas fa-clock text-2xl text-orange-600"></i>
+                                </div>
+                                <div class="ml-5 w-0 flex-1">
+                                    <dl>
+                                        <dt class="text-sm font-medium text-gray-500 truncate">Avg Response Time</dt>
+                                        <dd class="text-lg font-medium text-gray-900" id="avg-response-time">-</dd>
+                                    </dl>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Quick Actions -->
+                <div class="bg-white shadow rounded-lg mb-8">
+                    <div class="px-6 py-4 border-b border-gray-200">
+                        <h3 class="text-lg font-medium text-gray-900">Quick Actions</h3>
+                    </div>
+                    <div class="p-6">
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            <button onclick="showTab('upload')" class="bg-blue-600 hover:bg-blue-700 text-white font-medium py-3 px-4 rounded-lg transition-colors duration-200">
+                                <i class="fas fa-upload mr-2"></i>Upload New Model
+                            </button>
+                            <button onclick="showTab('models')" class="bg-green-600 hover:bg-green-700 text-white font-medium py-3 px-4 rounded-lg transition-colors duration-200">
+                                <i class="fas fa-list mr-2"></i>View Models
+                            </button>
+                            <button onclick="showTab('test')" class="bg-purple-600 hover:bg-purple-700 text-white font-medium py-3 px-4 rounded-lg transition-colors duration-200">
+                                <i class="fas fa-play mr-2"></i>Test Models
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Recent Activity -->
+                <div class="bg-white shadow rounded-lg">
+                    <div class="px-6 py-4 border-b border-gray-200">
+                        <h3 class="text-lg font-medium text-gray-900">Recent Activity</h3>
+                    </div>
+                    <div class="p-6">
+                        <div id="recent-activity" class="space-y-4">
+                            <div class="text-gray-500 text-center py-8">
+                                <i class="fas fa-history text-3xl mb-4"></i>
+                                <p>No recent activity</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Upload Model Tab -->
+        <div id="upload" class="tab-content">
+            <div class="px-4 py-6 sm:px-0">
+                <div class="mb-8">
+                    <h2 class="text-3xl font-bold text-gray-900">Upload Model</h2>
+                    <p class="mt-2 text-gray-600">Upload your trained ML model and configure its schema</p>
+                </div>
+
+                <div class="bg-white shadow rounded-lg">
+                    <div class="px-6 py-4 border-b border-gray-200">
+                        <h3 class="text-lg font-medium text-gray-900">Model Upload</h3>
+                    </div>
+                    <div class="p-6">
+                        <form id="upload-form" class="space-y-6">
+                            <!-- Model Information -->
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                <div>
+                                    <label for="model-name" class="block text-sm font-medium text-gray-700">Model Name</label>
+                                    <input type="text" id="model-name" name="model-name" required 
+                                           class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500">
+                                </div>
+                                <div>
+                                    <label for="model-framework" class="block text-sm font-medium text-gray-700">Framework</label>
+                                    <select id="model-framework" name="model-framework" required
+                                            class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500">
+                                        <option value="">Select Framework</option>
+                                        <option value="sklearn">Scikit-Learn</option>
+                                        <option value="tensorflow">TensorFlow</option>
+                                        <option value="pytorch">PyTorch</option>
+                                        <option value="xgboost">XGBoost</option>
+                                        <option value="lightgbm">LightGBM</option>
+                                        <option value="h2o">H2O</option>
+                                        <option value="onnx">ONNX</option>
+                                        <option value="custom">Custom</option>
+                                    </select>
+                                </div>
+                            </div>
+
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                <div>
+                                    <label for="model-type" class="block text-sm font-medium text-gray-700">Model Type</label>
+                                    <select id="model-type" name="model-type" required
+                                            class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500">
+                                        <option value="">Select Type</option>
+                                        <option value="classification">Classification</option>
+                                        <option value="regression">Regression</option>
+                                        <option value="clustering">Clustering</option>
+                                        <option value="nlp">NLP</option>
+                                        <option value="computer_vision">Computer Vision</option>
+                                        <option value="time_series">Time Series</option>
+                                        <option value="other">Other</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label for="model-version" class="block text-sm font-medium text-gray-700">Version</label>
+                                    <input type="text" id="model-version" name="model-version" value="1.0.0"
+                                           class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500">
+                                </div>
+                            </div>
+
+                            <div>
+                                <label for="model-description" class="block text-sm font-medium text-gray-700">Description</label>
+                                <textarea id="model-description" name="model-description" rows="3"
+                                          class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500"
+                                          placeholder="Describe your model..."></textarea>
+                            </div>
+
+                            <!-- File Upload -->
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-2">Model File</label>
+                                <div id="upload-zone" class="upload-zone p-6 text-center rounded-lg cursor-pointer">
+                                    <input type="file" id="model-file" name="model-file" class="hidden" accept=".pkl,.joblib,.h5,.pt,.pth,.pb,.onnx,.zip">
+                                    <div id="upload-content">
+                                        <i class="fas fa-cloud-upload-alt text-4xl text-gray-400 mb-4"></i>
+                                        <p class="text-lg text-gray-600">Drag and drop your model file here</p>
+                                        <p class="text-sm text-gray-500 mt-2">or click to browse</p>
+                                        <p class="text-xs text-gray-400 mt-1">Supported formats: .pkl, .joblib, .h5, .pt, .pth, .pb, .onnx, .zip</p>
+                                    </div>
+                                    <div id="file-info" class="hidden">
+                                        <i class="fas fa-file text-4xl text-green-500 mb-4"></i>
+                                        <p id="file-name" class="text-lg text-gray-800"></p>
+                                        <p id="file-size" class="text-sm text-gray-500"></p>
+                                        <button type="button" onclick="clearFile()" class="mt-2 text-red-600 hover:text-red-800">
+                                            <i class="fas fa-times mr-1"></i>Remove
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Schema Configuration Toggle -->
+                            <div class="border-t pt-6">
+                                <div class="flex items-center justify-between">
+                                    <div>
+                                        <h4 class="text-lg font-medium text-gray-900">Input/Output Schema</h4>
+                                        <p class="text-sm text-gray-600">Define the expected inputs and outputs for your model</p>
+                                    </div>
+                                    <button type="button" id="schema-toggle" onclick="toggleSchemaConfig()" 
+                                            class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg">
+                                        <i class="fas fa-plus mr-2"></i>Configure Schema
+                                    </button>
+                                </div>
+                            </div>
+
+                            <!-- Schema Configuration Section -->
+                            <div id="schema-config" class="hidden border-t pt-6">
+                                <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                                    <!-- Input Schema -->
+                                    <div>
+                                        <h5 class="text-md font-medium text-gray-900 mb-4">Input Schema</h5>
+                                        <div id="input-fields" class="space-y-4">
+                                            <!-- Dynamic input fields will be added here -->
+                                        </div>
+                                        <button type="button" onclick="addInputField()" 
+                                                class="mt-4 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded text-sm">
+                                            <i class="fas fa-plus mr-2"></i>Add Input Field
+                                        </button>
+                                    </div>
+
+                                    <!-- Output Schema -->
+                                    <div>
+                                        <h5 class="text-md font-medium text-gray-900 mb-4">Output Schema</h5>
+                                        <div id="output-fields" class="space-y-4">
+                                            <!-- Dynamic output fields will be added here -->
+                                        </div>
+                                        <button type="button" onclick="addOutputField()" 
+                                                class="mt-4 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded text-sm">
+                                            <i class="fas fa-plus mr-2"></i>Add Output Field
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <!-- Schema Templates -->
+                                <div class="mt-6 p-4 bg-gray-50 rounded-lg">
+                                    <h6 class="text-sm font-medium text-gray-900 mb-3">Use Template</h6>
+                                    <div class="flex flex-wrap gap-2">
+                                        <button type="button" onclick="loadTemplate('house_price_prediction')" 
+                                                class="bg-blue-100 hover:bg-blue-200 text-blue-800 px-3 py-1 rounded text-sm">
+                                            House Price Prediction
+                                        </button>
+                                        <button type="button" onclick="loadTemplate('classification')" 
+                                                class="bg-green-100 hover:bg-green-200 text-green-800 px-3 py-1 rounded text-sm">
+                                            Binary Classification
+                                        </button>
+                                        <button type="button" onclick="loadTemplate('text_analysis')" 
+                                                class="bg-purple-100 hover:bg-purple-200 text-purple-800 px-3 py-1 rounded text-sm">
+                                            Text Analysis
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Submit Button -->
+                            <div class="border-t pt-6">
+                                <button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-3 px-4 rounded-lg transition-colors duration-200">
+                                    <i class="fas fa-upload mr-2"></i>Upload Model
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Models Tab -->
+        <div id="models" class="tab-content">
+            <div class="px-4 py-6 sm:px-0">
+                <div class="flex justify-between items-center mb-8">
+                    <div>
+                        <h2 class="text-3xl font-bold text-gray-900">My Models</h2>
+                        <p class="mt-2 text-gray-600">Manage your uploaded models and their schemas</p>
+                    </div>
+                    <button onclick="showTab('upload')" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg">
+                        <i class="fas fa-plus mr-2"></i>Upload New Model
+                    </button>
+                </div>
+
+                <!-- Models List -->
+                <div class="bg-white shadow rounded-lg">
+                    <div class="px-6 py-4 border-b border-gray-200">
+                        <h3 class="text-lg font-medium text-gray-900">Models</h3>
+                    </div>
+                    <div id="models-list" class="p-6">
+                        <div class="text-center py-8 text-gray-500">
+                            <i class="fas fa-brain text-4xl mb-4"></i>
+                            <p>No models uploaded yet</p>
+                            <button onclick="showTab('upload')" class="mt-4 text-blue-600 hover:text-blue-800">
+                                Upload your first model
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Deployments Tab -->
+        <div id="deployments" class="tab-content">
+            <div class="px-4 py-6 sm:px-0">
+                <div class="flex justify-between items-center mb-8">
+                    <div>
+                        <h2 class="text-3xl font-bold text-gray-900">Deployments</h2>
+                        <p class="mt-2 text-gray-600">Manage your deployed models and API endpoints</p>
+                    </div>
+                </div>
+
+                <!-- Deployments List -->
+                <div class="bg-white shadow rounded-lg">
+                    <div class="px-6 py-4 border-b border-gray-200">
+                        <h3 class="text-lg font-medium text-gray-900">Active Deployments</h3>
+                    </div>
+                    <div id="deployments-list" class="p-6">
+                        <div class="text-center py-8 text-gray-500">
+                            <i class="fas fa-rocket text-4xl mb-4"></i>
+                            <p>No deployments yet</p>
+                            <p class="text-sm mt-2">Deploy a model to create API endpoints</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Test Models Tab -->
+        <div id="test" class="tab-content">
+            <div class="px-4 py-6 sm:px-0">
+                <div class="mb-8">
+                    <h2 class="text-3xl font-bold text-gray-900">Test Models</h2>
+                    <p class="mt-2 text-gray-600">Test your deployed models with sample data</p>
+                </div>
+
+                <!-- Model Selection -->
+                <div class="bg-white shadow rounded-lg mb-6">
+                    <div class="px-6 py-4 border-b border-gray-200">
+                        <h3 class="text-lg font-medium text-gray-900">Select Model to Test</h3>
+                    </div>
+                    <div class="p-6">
+                        <select id="test-model-select" onchange="loadTestInterface()" 
+                                class="w-full border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500">
+                            <option value="">Select a deployed model...</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- Test Interface -->
+                <div id="test-interface" class="hidden">
+                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                        <!-- Input Form -->
+                        <div class="bg-white shadow rounded-lg">
+                            <div class="px-6 py-4 border-b border-gray-200">
+                                <h3 class="text-lg font-medium text-gray-900">Test Input</h3>
+                            </div>
+                            <div class="p-6">
+                                <form id="test-form">
+                                    <div id="test-input-fields" class="space-y-4">
+                                        <!-- Dynamic test fields will be added here -->
+                                    </div>
+                                    <div class="mt-6 space-y-3">
+                                        <button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-3 px-4 rounded-lg">
+                                            <i class="fas fa-play mr-2"></i>Test Model
+                                        </button>
+                                        <button type="button" onclick="loadExampleData()" 
+                                                class="w-full bg-gray-600 hover:bg-gray-700 text-white font-medium py-2 px-4 rounded-lg">
+                                            <i class="fas fa-magic mr-2"></i>Load Example Data
+                                        </button>
+                                    </div>
+                                </form>
+                            </div>
+                        </div>
+
+                        <!-- Results -->
+                        <div class="bg-white shadow rounded-lg">
+                            <div class="px-6 py-4 border-b border-gray-200">
+                                <h3 class="text-lg font-medium text-gray-900">Prediction Results</h3>
+                            </div>
+                            <div class="p-6">
+                                <div id="test-results" class="text-center py-8 text-gray-500">
+                                    <i class="fas fa-chart-bar text-4xl mb-4"></i>
+                                    <p>Run a test to see results</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Notification Container -->
+    <div id="notifications" class="notification"></div>
+
+    <!-- Loading Overlay -->
+    <div id="loading-overlay" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
+        <div class="bg-white rounded-lg p-8 text-center">
+            <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+            <p class="text-gray-700">Processing...</p>
+        </div>
+    </div>
+
+    <script src="js/app.js"></script>
+</body>
+</html> 
