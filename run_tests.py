@@ -7,7 +7,21 @@ Provides convenient commands to run different types of tests
 import sys
 import subprocess
 import argparse
+import shutil
 from pathlib import Path
+
+
+def is_poetry_project():
+    """Check if this is a Poetry project"""
+    return Path("pyproject.toml").exists() and Path("poetry.lock").exists()
+
+
+def get_python_cmd():
+    """Get the appropriate Python command to use"""
+    if is_poetry_project() and shutil.which("poetry"):
+        return ["poetry", "run", "python"]
+    else:
+        return ["python"]
 
 
 def run_command(cmd, description=""):
@@ -76,8 +90,9 @@ Examples:
     
     args = parser.parse_args()
     
-    # Build pytest command
-    cmd = ["python", "-m", "pytest"]
+    # Build pytest command with appropriate Python interpreter
+    python_cmd = get_python_cmd()
+    cmd = python_cmd + ["-m", "pytest"]
     
     # Add markers based on test type
     markers = []
@@ -162,8 +177,9 @@ Examples:
 
 def run_quick_tests():
     """Run a quick test suite for development"""
-    cmd = [
-        "python", "-m", "pytest",
+    python_cmd = get_python_cmd()
+    cmd = python_cmd + [
+        "-m", "pytest",
         "-m", "not slow",
         "--tb=short",
         "-q"
@@ -173,8 +189,9 @@ def run_quick_tests():
 
 def run_ci_tests():
     """Run complete test suite for CI/CD"""
-    cmd = [
-        "python", "-m", "pytest",
+    python_cmd = get_python_cmd()
+    cmd = python_cmd + [
+        "-m", "pytest",
         "--cov=app",
         "--cov-report=xml",
         "--cov-fail-under=80",
@@ -187,12 +204,20 @@ def check_test_setup():
     """Check if test environment is properly set up"""
     print("🔍 Checking test environment setup...")
     
-    # Check if pytest is installed
+    # Check if pytest is installed in the appropriate environment
+    python_cmd = get_python_cmd()
     try:
-        import pytest
-        print(f"✅ pytest installed: {pytest.__version__}")
-    except ImportError:
-        print("❌ pytest not installed. Run: pip install pytest")
+        result = subprocess.run(
+            python_cmd + ["-c", "import pytest; print(pytest.__version__)"],
+            capture_output=True,
+            text=True,
+            check=True
+        )
+        version = result.stdout.strip()
+        print(f"✅ pytest installed: {version}")
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        env_type = "Poetry environment" if is_poetry_project() else "system Python"
+        print(f"❌ pytest not installed in {env_type}. Run: poetry install" if is_poetry_project() else "pip install pytest")
         return False
     
     # Check test directory exists

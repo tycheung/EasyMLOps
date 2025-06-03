@@ -4,7 +4,7 @@ Handles environment variables, database settings, and application configuration
 """
 
 import os
-from typing import Optional
+from typing import Optional, Union
 from pydantic import PostgresDsn, validator
 from pydantic_settings import BaseSettings
 
@@ -24,18 +24,30 @@ class Settings(BaseSettings):
     RELOAD: bool = False
     
     # Database Settings
+    USE_SQLITE: bool = False  # New flag to choose database type
+    SQLITE_PATH: str = "easymlops.db"  # SQLite database file path
+    
+    # PostgreSQL Settings (used when USE_SQLITE=False)
     POSTGRES_SERVER: str = "localhost"
     POSTGRES_PORT: str = "5432"
     POSTGRES_USER: str = "postgres"
     POSTGRES_PASSWORD: str = ""
     POSTGRES_DB: str = "easymlops"
-    DATABASE_URL: Optional[PostgresDsn] = None
+    DATABASE_URL: Optional[Union[PostgresDsn, str]] = None
     
     @validator("DATABASE_URL", pre=True)
     def assemble_db_connection(cls, v: Optional[str], values: dict[str, any]) -> any:
         if isinstance(v, str):
             return v
         
+        # Check if we should use SQLite
+        use_sqlite = values.get("USE_SQLITE", False)
+        
+        if use_sqlite:
+            sqlite_path = values.get("SQLITE_PATH", "easymlops.db")
+            return f"sqlite:///{sqlite_path}"
+        
+        # Build PostgreSQL URL
         user = values.get("POSTGRES_USER")
         password = values.get("POSTGRES_PASSWORD")
         host = values.get("POSTGRES_SERVER")
@@ -74,6 +86,14 @@ class Settings(BaseSettings):
     ENABLE_METRICS: bool = True
     METRICS_PORT: int = 9090
     
+    def is_sqlite(self) -> bool:
+        """Check if using SQLite database"""
+        return self.USE_SQLITE
+    
+    def get_db_type(self) -> str:
+        """Get database type string"""
+        return "SQLite" if self.USE_SQLITE else "PostgreSQL"
+    
     class Config:
         env_file = ".env"
         case_sensitive = True
@@ -88,7 +108,6 @@ def get_settings() -> Settings:
     return settings
 
 
-# Create necessary directories
 def create_directories():
     """Create required directories if they don't exist"""
     directories = [
@@ -100,4 +119,18 @@ def create_directories():
     ]
     
     for directory in directories:
-        os.makedirs(directory, exist_ok=True) 
+        os.makedirs(directory, exist_ok=True)
+
+
+def init_sqlite_database():
+    """Initialize SQLite database if it doesn't exist"""
+    if settings.is_sqlite():
+        sqlite_path = settings.SQLITE_PATH
+        if not os.path.exists(sqlite_path):
+            # Create empty SQLite database file
+            import sqlite3
+            conn = sqlite3.connect(sqlite_path)
+            conn.close()
+            print(f"Created SQLite database: {sqlite_path}")
+        else:
+            print(f"Using existing SQLite database: {sqlite_path}") 

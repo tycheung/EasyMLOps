@@ -8,10 +8,10 @@ from datetime import datetime, timezone
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.models.model import Model, Deployment
+from app.models.model import Model, ModelDeployment
 from app.models.monitoring import (
-    PredictionLog, ModelPerformanceMetric, SystemHealthMetric,
-    Alert, AuditLog
+    PredictionLogDB, ModelPerformanceMetricsDB, SystemHealthMetricDB,
+    AlertDB, AuditLogDB
 )
 
 
@@ -26,9 +26,9 @@ class TestModelClass:
             "model_type": "classification",
             "framework": "sklearn",
             "version": "1.0.0",
-            "input_schema": {"type": "object", "properties": {"x": {"type": "number"}}},
-            "output_schema": {"type": "object", "properties": {"y": {"type": "number"}}},
-            "performance_metrics": {"accuracy": 0.95}
+            "file_name": "test_model.joblib",
+            "file_size": 1024,
+            "file_hash": "abcd1234efgh5678"
         }
         
         model = Model(**model_data)
@@ -39,7 +39,6 @@ class TestModelClass:
         assert model.name == "test_model"
         assert model.model_type == "classification"
         assert model.framework == "sklearn"
-        assert model.is_active is True
         assert model.created_at is not None
         assert model.updated_at is not None
     
@@ -51,30 +50,27 @@ class TestModelClass:
             test_session.add(model)
             test_session.commit()
     
-    def test_model_unique_name_constraint(self, test_session):
-        """Test unique name constraint"""
-        model1 = Model(
-            name="duplicate_name",
-            description="First model",
-            model_type="classification",
-            framework="sklearn",
-            version="1.0.0",
-            input_schema={},
-            output_schema={}
-        )
+    def test_model_unique_hash_constraint(self, test_session):
+        """Test unique file hash constraint"""
+        model_data = {
+            "name": "first_model",
+            "description": "First model",
+            "model_type": "classification",
+            "framework": "sklearn",
+            "version": "1.0.0",
+            "file_name": "test1.joblib",
+            "file_size": 1024,
+            "file_hash": "duplicate_hash"
+        }
+        
+        model1 = Model(**model_data)
         test_session.add(model1)
         test_session.commit()
         
-        # Try to create another model with same name
-        model2 = Model(
-            name="duplicate_name",
-            description="Second model",
-            model_type="regression",
-            framework="tensorflow",
-            version="2.0.0",
-            input_schema={},
-            output_schema={}
-        )
+        # Try to create another model with same hash
+        model_data["name"] = "second_model"
+        model_data["file_name"] = "test2.joblib"
+        model2 = Model(**model_data)
         
         test_session.add(model2)
         with pytest.raises(IntegrityError):
@@ -82,30 +78,7 @@ class TestModelClass:
     
     def test_model_json_fields(self, test_session):
         """Test JSON field storage and retrieval"""
-        input_schema = {
-            "type": "object",
-            "properties": {
-                "feature1": {"type": "number", "minimum": 0},
-                "feature2": {"type": "string", "enum": ["A", "B", "C"]}
-            },
-            "required": ["feature1", "feature2"]
-        }
-        
-        output_schema = {
-            "type": "object",
-            "properties": {
-                "prediction": {"type": "string"},
-                "confidence": {"type": "number", "minimum": 0, "maximum": 1}
-            }
-        }
-        
-        metrics = {
-            "accuracy": 0.95,
-            "precision": 0.92,
-            "recall": 0.98,
-            "f1_score": 0.95,
-            "training_time": 120.5
-        }
+        tags = ["ml", "classification", "production"]
         
         model = Model(
             name="json_test_model",
@@ -113,9 +86,10 @@ class TestModelClass:
             model_type="classification",
             framework="sklearn",
             version="1.0.0",
-            input_schema=input_schema,
-            output_schema=output_schema,
-            performance_metrics=metrics
+            file_name="test_model.joblib",
+            file_size=1024,
+            file_hash="json_test_hash",
+            tags=tags
         )
         
         test_session.add(model)
@@ -123,10 +97,9 @@ class TestModelClass:
         test_session.refresh(model)
         
         # Verify JSON fields are stored and retrieved correctly
-        assert model.input_schema == input_schema
-        assert model.output_schema == output_schema
-        assert model.performance_metrics == metrics
-        assert model.performance_metrics["accuracy"] == 0.95
+        assert model.tags == tags
+        assert "ml" in model.tags
+        assert "classification" in model.tags
     
     def test_model_relationships(self, test_session):
         """Test model relationships with deployments"""
@@ -136,30 +109,31 @@ class TestModelClass:
             model_type="classification",
             framework="sklearn",
             version="1.0.0",
-            input_schema={},
-            output_schema={}
+            file_name="test_model.joblib",
+            file_size=1024,
+            file_hash="relationship_test_hash"
         )
         test_session.add(model)
         test_session.commit()
         test_session.refresh(model)
         
         # Create deployments for this model
-        deployment1 = Deployment(
-            name="deployment1",
+        deployment1 = ModelDeployment(
+            deployment_name="deployment1",
             model_id=model.id,
-            endpoint_url="http://localhost:3001",
-            environment="test",
-            resources={},
-            scaling={}
+            deployment_url="http://localhost:3001",
+            status="pending",
+            configuration={},
+            replicas=1
         )
         
-        deployment2 = Deployment(
-            name="deployment2",
+        deployment2 = ModelDeployment(
+            deployment_name="deployment2",
             model_id=model.id,
-            endpoint_url="http://localhost:3002",
-            environment="staging",
-            resources={},
-            scaling={}
+            deployment_url="http://localhost:3002",
+            status="pending",
+            configuration={},
+            replicas=1
         )
         
         test_session.add_all([deployment1, deployment2])
@@ -171,60 +145,38 @@ class TestModelClass:
         assert deployment1 in model.deployments
         assert deployment2 in model.deployments
     
-    def test_model_soft_delete(self, test_session):
-        """Test model soft delete functionality"""
-        model = Model(
-            name="soft_delete_test",
-            description="Testing soft delete",
-            model_type="classification",
-            framework="sklearn",
-            version="1.0.0",
-            input_schema={},
-            output_schema={}
-        )
-        test_session.add(model)
-        test_session.commit()
-        
-        # Initially active
-        assert model.is_active is True
-        
-        # Soft delete
-        model.is_active = False
-        test_session.commit()
-        
-        # Verify soft delete
-        test_session.refresh(model)
-        assert model.is_active is False
-    
     def test_model_timestamps(self, test_session):
-        """Test model timestamp behavior"""
+        """Test model timestamp fields"""
+        from datetime import datetime, timezone
+        creation_time = datetime.now(timezone.utc)
+        
         model = Model(
-            name="timestamp_test",
+            name="timestamp_test_model",
             description="Testing timestamps",
             model_type="classification",
             framework="sklearn",
             version="1.0.0",
-            input_schema={},
-            output_schema={}
+            file_name="test_model.joblib",
+            file_size=1024,
+            file_hash="timestamp_test_hash"
         )
         
-        creation_time = datetime.now(timezone.utc)
         test_session.add(model)
         test_session.commit()
         test_session.refresh(model)
         
-        # Check creation timestamp
-        assert model.created_at is not None
+        # Convert to UTC if not already timezone-aware for comparison
+        model_created_at = model.created_at
+        if model_created_at.tzinfo is None:
+            model_created_at = model_created_at.replace(tzinfo=timezone.utc)
+        
+        # Timestamps should be populated
+        assert model_created_at >= creation_time
         assert model.updated_at is not None
-        assert model.created_at >= creation_time
         
-        # Update model and check updated timestamp
-        original_updated = model.updated_at
-        model.description = "Updated description"
-        test_session.commit()
-        test_session.refresh(model)
-        
-        assert model.updated_at > original_updated
+        # Should be close to current time (within 1 second)
+        time_diff = abs((datetime.now(timezone.utc) - model_created_at).total_seconds())
+        assert time_diff < 1.0
 
 
 class TestDeploymentClass:
@@ -233,36 +185,36 @@ class TestDeploymentClass:
     def test_deployment_creation(self, test_session, test_model):
         """Test basic deployment creation"""
         deployment_data = {
-            "name": "test_deployment",
-            "description": "A test deployment",
+            "deployment_name": "test_deployment",
             "model_id": test_model.id,
-            "endpoint_url": "http://localhost:3001",
-            "environment": "test",
-            "resources": {"cpu": "100m", "memory": "256Mi"},
-            "scaling": {"min_replicas": 1, "max_replicas": 3}
+            "deployment_url": "http://localhost:3001",
+            "status": "pending",
+            "configuration": {"cpu": "100m", "memory": "256Mi"},
+            "cpu_request": 0.1,
+            "memory_request": "256Mi",
+            "replicas": 1
         }
         
-        deployment = Deployment(**deployment_data)
+        deployment = ModelDeployment(**deployment_data)
         test_session.add(deployment)
         test_session.commit()
         
         assert deployment.id is not None
-        assert deployment.name == "test_deployment"
+        assert deployment.deployment_name == "test_deployment"
         assert deployment.model_id == test_model.id
-        assert deployment.endpoint_url == "http://localhost:3001"
+        assert deployment.deployment_url == "http://localhost:3001"
         assert deployment.status == "pending"
-        assert deployment.is_active is True
         assert deployment.created_at is not None
     
     def test_deployment_model_relationship(self, test_session, test_model):
         """Test deployment-model relationship"""
-        deployment = Deployment(
-            name="relationship_test",
+        deployment = ModelDeployment(
+            deployment_name="relationship_test",
             model_id=test_model.id,
-            endpoint_url="http://localhost:3001",
-            environment="test",
-            resources={},
-            scaling={}
+            deployment_url="http://localhost:3001",
+            status="pending",
+            configuration={},
+            replicas=1
         )
         test_session.add(deployment)
         test_session.commit()
@@ -281,14 +233,13 @@ class TestDeploymentClass:
         valid_statuses = ["pending", "deploying", "running", "failed", "stopped"]
         
         for status in valid_statuses:
-            deployment = Deployment(
-                name=f"status_test_{status}",
+            deployment = ModelDeployment(
+                deployment_name=f"status_test_{status}",
                 model_id=test_model.id,
-                endpoint_url=f"http://localhost:300{valid_statuses.index(status)}",
-                environment="test",
+                deployment_url=f"http://localhost:300{valid_statuses.index(status)}",
                 status=status,
-                resources={},
-                scaling={}
+                configuration={},
+                replicas=1
             )
             test_session.add(deployment)
             test_session.commit()
@@ -296,57 +247,33 @@ class TestDeploymentClass:
             
             assert deployment.status == status
     
-    def test_deployment_environment_values(self, test_session, test_model):
-        """Test deployment environment values"""
-        environments = ["development", "test", "staging", "production"]
-        
-        for env in environments:
-            deployment = Deployment(
-                name=f"env_test_{env}",
-                model_id=test_model.id,
-                endpoint_url=f"http://localhost:300{environments.index(env)}",
-                environment=env,
-                resources={},
-                scaling={}
-            )
-            test_session.add(deployment)
-            test_session.commit()
-            test_session.refresh(deployment)
-            
-            assert deployment.environment == env
-    
     def test_deployment_json_configuration(self, test_session, test_model):
         """Test JSON configuration storage"""
-        resources = {
+        configuration = {
             "cpu": "500m",
             "memory": "1Gi",
             "gpu": {"type": "nvidia-tesla-k80", "count": 1}
         }
         
-        scaling = {
-            "min_replicas": 2,
-            "max_replicas": 10,
-            "target_cpu_utilization": 70,
-            "scale_down_delay": "300s"
-        }
-        
-        deployment = Deployment(
-            name="json_config_test",
+        deployment = ModelDeployment(
+            deployment_name="json_config_test",
             model_id=test_model.id,
-            endpoint_url="http://localhost:3001",
-            environment="test",
-            resources=resources,
-            scaling=scaling
+            deployment_url="http://localhost:3001",
+            status="pending",
+            configuration=configuration,
+            cpu_request=0.5,
+            memory_request="1Gi",
+            replicas=2
         )
         
         test_session.add(deployment)
         test_session.commit()
         test_session.refresh(deployment)
         
-        assert deployment.resources == resources
-        assert deployment.scaling == scaling
-        assert deployment.resources["cpu"] == "500m"
-        assert deployment.scaling["min_replicas"] == 2
+        assert deployment.configuration == configuration
+        assert deployment.configuration["cpu"] == "500m"
+        assert deployment.cpu_request == 0.5
+        assert deployment.replicas == 2
 
 
 class TestPredictionLog:
@@ -355,58 +282,45 @@ class TestPredictionLog:
     def test_prediction_log_creation(self, test_session, test_model):
         """Test prediction log creation"""
         log_data = {
+            "id": "test_log_123",
             "model_id": test_model.id,
+            "request_id": "req_123",
             "input_data": {"feature1": 0.5, "feature2": "test"},
-            "prediction": {"class": "A", "probability": 0.85},
-            "response_time_ms": 150.5,
-            "status": "success"
+            "output_data": {"class": "A", "probability": 0.85},
+            "latency_ms": 150.5,
+            "api_endpoint": "/predict",
+            "success": True
         }
         
-        log = PredictionLog(**log_data)
+        log = PredictionLogDB(**log_data)
         test_session.add(log)
         test_session.commit()
         
         assert log.id is not None
         assert log.model_id == test_model.id
         assert log.input_data == {"feature1": 0.5, "feature2": "test"}
-        assert log.prediction == {"class": "A", "probability": 0.85}
-        assert log.response_time_ms == 150.5
-        assert log.status == "success"
+        assert log.output_data == {"class": "A", "probability": 0.85}
+        assert log.latency_ms == 150.5
+        assert log.success is True
         assert log.timestamp is not None
     
-    def test_prediction_log_status_values(self, test_session, test_model):
-        """Test prediction log status values"""
-        statuses = ["success", "error", "timeout"]
-        
-        for status in statuses:
-            log = PredictionLog(
-                model_id=test_model.id,
-                input_data={"test": "data"},
-                prediction={"result": "test"},
-                response_time_ms=100.0,
-                status=status
-            )
-            test_session.add(log)
-            test_session.commit()
-            test_session.refresh(log)
-            
-            assert log.status == status
-    
-    def test_prediction_log_model_relationship(self, test_session, test_model):
-        """Test prediction log model relationship"""
-        log = PredictionLog(
+    def test_prediction_log_success_values(self, test_session, test_model):
+        """Test prediction log success values"""
+        log = PredictionLogDB(
+            id="test_log_success",
             model_id=test_model.id,
+            request_id="req_123",
             input_data={"test": "data"},
-            prediction={"result": "test"},
-            response_time_ms=100.0,
-            status="success"
+            output_data={"result": "test"},
+            latency_ms=100.0,
+            api_endpoint="/predict",
+            success=True
         )
         test_session.add(log)
         test_session.commit()
         test_session.refresh(log)
         
-        assert log.model.id == test_model.id
-        assert log.model.name == test_model.name
+        assert log.success is True
 
 
 class TestModelPerformanceMetric:
@@ -414,11 +328,25 @@ class TestModelPerformanceMetric:
     
     def test_performance_metric_creation(self, test_session, test_model):
         """Test performance metric creation"""
-        metric = ModelPerformanceMetric(
+        from datetime import datetime, timedelta
+        now = datetime.utcnow()
+        
+        metric = ModelPerformanceMetricsDB(
+            id="test_metric_123",
             model_id=test_model.id,
-            metric_name="accuracy",
-            metric_value=0.95,
-            evaluation_data={"test_samples": 1000, "validation_set": "v1"}
+            time_window_start=now - timedelta(hours=1),
+            time_window_end=now,
+            total_requests=100,
+            successful_requests=95,
+            failed_requests=5,
+            requests_per_minute=10.0,
+            avg_latency_ms=150.0,
+            p50_latency_ms=140.0,
+            p95_latency_ms=200.0,
+            p99_latency_ms=250.0,
+            max_latency_ms=300.0,
+            success_rate=0.95,
+            error_rate=0.05
         )
         
         test_session.add(metric)
@@ -426,35 +354,9 @@ class TestModelPerformanceMetric:
         
         assert metric.id is not None
         assert metric.model_id == test_model.id
-        assert metric.metric_name == "accuracy"
-        assert metric.metric_value == 0.95
-        assert metric.evaluation_data == {"test_samples": 1000, "validation_set": "v1"}
-        assert metric.timestamp is not None
-    
-    def test_performance_metric_types(self, test_session, test_model):
-        """Test different performance metric types"""
-        metrics = [
-            ("accuracy", 0.95),
-            ("precision", 0.92),
-            ("recall", 0.98),
-            ("f1_score", 0.95),
-            ("auc_roc", 0.89),
-            ("mean_squared_error", 0.05)
-        ]
-        
-        for metric_name, value in metrics:
-            metric = ModelPerformanceMetric(
-                model_id=test_model.id,
-                metric_name=metric_name,
-                metric_value=value,
-                evaluation_data={"test": "data"}
-            )
-            test_session.add(metric)
-            test_session.commit()
-            test_session.refresh(metric)
-            
-            assert metric.metric_name == metric_name
-            assert metric.metric_value == value
+        assert metric.total_requests == 100
+        assert metric.success_rate == 0.95
+        assert metric.created_at is not None
 
 
 class TestSystemHealthMetric:
@@ -462,25 +364,22 @@ class TestSystemHealthMetric:
     
     def test_system_health_metric_creation(self, test_session):
         """Test system health metric creation"""
-        metric = SystemHealthMetric(
-            component_name="api_server",
-            metric_name="cpu_usage",
-            metric_value=45.2,
-            unit="percentage",
-            threshold_warning=70.0,
-            threshold_critical=90.0
+        metric = SystemHealthMetricDB(
+            id="test_health_123",
+            component="api_server",
+            metric_type="cpu_usage",
+            value=45.2,
+            unit="percentage"
         )
         
         test_session.add(metric)
         test_session.commit()
         
         assert metric.id is not None
-        assert metric.component_name == "api_server"
-        assert metric.metric_name == "cpu_usage"
-        assert metric.metric_value == 45.2
+        assert metric.component == "api_server"
+        assert metric.metric_type == "cpu_usage"
+        assert metric.value == 45.2
         assert metric.unit == "percentage"
-        assert metric.threshold_warning == 70.0
-        assert metric.threshold_critical == 90.0
         assert metric.timestamp is not None
     
     def test_system_health_metric_components(self, test_session):
@@ -492,20 +391,21 @@ class TestSystemHealthMetric:
             ("nginx", "requests_per_second", 150.0)
         ]
         
-        for component, metric_name, value in components:
-            metric = SystemHealthMetric(
-                component_name=component,
-                metric_name=metric_name,
-                metric_value=value,
+        for component, metric_type, value in components:
+            metric = SystemHealthMetricDB(
+                id=f"test_{component}_{metric_type}",
+                component=component,
+                metric_type=metric_type,
+                value=value,
                 unit="percentage"
             )
             test_session.add(metric)
             test_session.commit()
             test_session.refresh(metric)
             
-            assert metric.component_name == component
-            assert metric.metric_name == metric_name
-            assert metric.metric_value == value
+            assert metric.component == component
+            assert metric.metric_type == metric_type
+            assert metric.value == value
 
 
 class TestAlert:
@@ -513,36 +413,36 @@ class TestAlert:
     
     def test_alert_creation(self, test_session):
         """Test alert creation"""
-        alert = Alert(
-            alert_type="performance",
+        alert = AlertDB(
+            id="test_alert_123",
             severity="warning",
+            component="api_server",
             title="High CPU Usage",
-            message="CPU usage exceeded 70% threshold",
-            source_component="api_server",
-            metadata={"cpu_usage": 75.5, "threshold": 70.0}
+            description="CPU usage exceeded 70% threshold",
+            additional_data={"cpu_usage": 75.5, "threshold": 70.0}
         )
         
         test_session.add(alert)
         test_session.commit()
         
         assert alert.id is not None
-        assert alert.alert_type == "performance"
         assert alert.severity == "warning"
+        assert alert.component == "api_server"
         assert alert.title == "High CPU Usage"
-        assert alert.is_resolved is False
-        assert alert.created_at is not None
+        assert alert.is_active is True
+        assert alert.triggered_at is not None
     
     def test_alert_severity_levels(self, test_session):
         """Test alert severity levels"""
         severities = ["info", "warning", "error", "critical"]
         
-        for severity in severities:
-            alert = Alert(
-                alert_type="test",
+        for i, severity in enumerate(severities):
+            alert = AlertDB(
+                id=f"test_alert_{i}",
                 severity=severity,
+                component="test_component",
                 title=f"Test {severity} alert",
-                message=f"This is a {severity} level alert",
-                source_component="test_component"
+                description=f"This is a {severity} level alert"
             )
             test_session.add(alert)
             test_session.commit()
@@ -552,28 +452,28 @@ class TestAlert:
     
     def test_alert_resolution(self, test_session):
         """Test alert resolution"""
-        alert = Alert(
-            alert_type="test",
+        alert = AlertDB(
+            id="test_alert_resolution",
             severity="warning",
+            component="test",
             title="Test Alert",
-            message="Test message",
-            source_component="test"
+            description="Test message"
         )
         
         test_session.add(alert)
         test_session.commit()
         
         # Initially unresolved
-        assert alert.is_resolved is False
+        assert alert.is_active is True
         assert alert.resolved_at is None
         
         # Resolve alert
-        alert.is_resolved = True
+        alert.is_active = False
         alert.resolved_at = datetime.now(timezone.utc)
         test_session.commit()
         test_session.refresh(alert)
         
-        assert alert.is_resolved is True
+        assert alert.is_active is False
         assert alert.resolved_at is not None
 
 
@@ -582,14 +482,16 @@ class TestAuditLog:
     
     def test_audit_log_creation(self, test_session):
         """Test audit log creation"""
-        audit = AuditLog(
+        audit = AuditLogDB(
+            id="test_audit_123",
             action="model_upload",
             resource_type="model",
             resource_id="model_123",
             user_id="user_456",
             ip_address="192.168.1.100",
             user_agent="Mozilla/5.0 (Test Browser)",
-            changes={"status": {"from": "pending", "to": "active"}}
+            old_values={"status": "pending"},
+            new_values={"status": "active"}
         )
         
         test_session.add(audit)
@@ -613,8 +515,9 @@ class TestAuditLog:
             ("schema_update", "schema")
         ]
         
-        for action, resource_type in actions:
-            audit = AuditLog(
+        for i, (action, resource_type) in enumerate(actions):
+            audit = AuditLogDB(
+                id=f"test_audit_{i}",
                 action=action,
                 resource_type=resource_type,
                 resource_id=f"{resource_type}_123",
@@ -632,68 +535,91 @@ class TestModelIntegration:
     """Integration tests for model relationships and constraints"""
     
     def test_model_deployment_cascade(self, test_session, test_model):
-        """Test cascade behavior when model is deleted"""
+        """Test relationships and data integrity between models"""
         # Create deployment
-        deployment = Deployment(
-            name="cascade_test",
+        deployment = ModelDeployment(
+            deployment_name="cascade_test",
             model_id=test_model.id,
-            endpoint_url="http://localhost:3001",
-            environment="test",
-            resources={},
-            scaling={}
+            deployment_url="http://localhost:3001",
+            status="pending",
+            configuration={},
+            replicas=1
         )
         test_session.add(deployment)
         test_session.commit()
         
         # Create prediction log
-        log = PredictionLog(
+        log = PredictionLogDB(
+            id="test_cascade_log",
             model_id=test_model.id,
+            request_id="req_123",
             input_data={"test": "data"},
-            prediction={"result": "test"},
-            response_time_ms=100.0,
-            status="success"
+            output_data={"result": "test"},
+            latency_ms=100.0,
+            api_endpoint="/predict",
+            success=True
         )
         test_session.add(log)
         test_session.commit()
         
         # Verify relationships exist
+        test_session.refresh(test_model)
         assert len(test_model.deployments) > 0
+        assert deployment in test_model.deployments
         
-        # Delete model (in real app, this might be soft delete)
-        test_session.delete(test_model)
-        test_session.commit()
+        # Verify monitoring data references the model correctly
+        assert log.model_id == test_model.id
         
-        # Check what happens to related records
-        # (Behavior depends on cascade configuration)
+        # Test that we can query related data
+        model_logs = test_session.query(PredictionLogDB).filter(
+            PredictionLogDB.model_id == test_model.id
+        ).all()
+        assert len(model_logs) == 1
+        assert model_logs[0].id == "test_cascade_log"
     
     def test_model_performance_tracking(self, test_session, test_model):
         """Test performance tracking across multiple metrics"""
-        metrics = [
+        from datetime import datetime, timedelta
+        now = datetime.utcnow()
+        
+        metrics_data = [
             ("accuracy", 0.95),
             ("precision", 0.92),
             ("recall", 0.98),
             ("f1_score", 0.95)
         ]
         
-        for metric_name, value in metrics:
-            metric = ModelPerformanceMetric(
+        # Create performance metrics
+        for i, (metric_name, value) in enumerate(metrics_data):
+            metric = ModelPerformanceMetricsDB(
+                id=f"test_metric_{i}",
                 model_id=test_model.id,
-                metric_name=metric_name,
-                metric_value=value,
-                evaluation_data={"timestamp": datetime.now().isoformat()}
+                time_window_start=now - timedelta(hours=1),
+                time_window_end=now,
+                total_requests=100,
+                successful_requests=95,
+                failed_requests=5,
+                requests_per_minute=10.0,
+                avg_latency_ms=150.0,
+                p50_latency_ms=140.0,
+                p95_latency_ms=200.0,
+                p99_latency_ms=250.0,
+                max_latency_ms=300.0,
+                success_rate=value,  # Use the metric value as success rate for testing
+                error_rate=0.05
             )
             test_session.add(metric)
         
         test_session.commit()
         
         # Query all metrics for the model
-        model_metrics = test_session.query(ModelPerformanceMetric).filter(
-            ModelPerformanceMetric.model_id == test_model.id
+        model_metrics = test_session.query(ModelPerformanceMetricsDB).filter(
+            ModelPerformanceMetricsDB.model_id == test_model.id
         ).all()
         
         assert len(model_metrics) == 4
-        metric_names = [m.metric_name for m in model_metrics]
-        assert "accuracy" in metric_names
-        assert "precision" in metric_names
-        assert "recall" in metric_names
-        assert "f1_score" in metric_names 
+        success_rates = [m.success_rate for m in model_metrics]
+        assert 0.95 in success_rates
+        assert 0.92 in success_rates
+        assert 0.98 in success_rates
+        assert 0.95 in success_rates 

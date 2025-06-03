@@ -13,7 +13,7 @@ from collections import defaultdict
 import statistics
 import uuid
 
-from sqlalchemy import and_, desc, func
+from sqlalchemy import and_, desc, func, select
 from sqlalchemy.orm import sessionmaker
 
 from app.database import get_session
@@ -602,6 +602,109 @@ class MonitoringService:
             except Exception as e:
                 logger.error(f"Error in alert check loop: {e}")
                 await asyncio.sleep(60)
+
+    async def check_system_health(self) -> Dict[str, Any]:
+        """Check current system health and return basic metrics"""
+        try:
+            # Get current system metrics
+            cpu_usage = psutil.cpu_percent(interval=1)
+            memory = psutil.virtual_memory()
+            disk = psutil.disk_usage('/')
+            
+            return {
+                "cpu_usage": cpu_usage,
+                "memory_usage": memory.percent,
+                "disk_usage": disk.percent,
+                "timestamp": datetime.utcnow().isoformat()
+            }
+        except Exception as e:
+            logger.error(f"Error checking system health: {e}")
+            return {
+                "cpu_usage": 0.0,
+                "memory_usage": 0.0,
+                "disk_usage": 0.0,
+                "error": str(e),
+                "timestamp": datetime.utcnow().isoformat()
+            }
+
+    async def calculate_metrics(self, session, model_id: str) -> Dict[str, Any]:
+        """Calculate metrics for a model (for test compatibility)"""
+        try:
+            # Get recent prediction logs for the model
+            stmt = select(PredictionLogDB).where(PredictionLogDB.model_id == model_id)
+            result = session.execute(stmt)
+            logs = result.scalars().all()
+            
+            if not logs:
+                return {
+                    "total_predictions": 0,
+                    "success_rate": 0.0,
+                    "average_response_time": 0.0
+                }
+            
+            total_predictions = len(logs)
+            successful_predictions = sum(1 for log in logs if log.success)
+            success_rate = successful_predictions / total_predictions if total_predictions > 0 else 0.0
+            
+            response_times = [log.latency_ms for log in logs]
+            average_response_time = sum(response_times) / len(response_times) if response_times else 0.0
+            
+            return {
+                "total_predictions": total_predictions,
+                "success_rate": success_rate,
+                "average_response_time": average_response_time
+            }
+        except Exception as e:
+            logger.error(f"Error calculating metrics: {e}")
+            raise
+
+    async def log_prediction(self, session, model_id: str, input_data: Dict[str, Any], 
+                           prediction: Dict[str, Any], response_time: float, status: str) -> None:
+        """Log a prediction (for test compatibility)"""
+        try:
+            log_entry = PredictionLogDB(
+                id=str(uuid.uuid4()),
+                model_id=model_id,
+                deployment_id=None,
+                request_id=str(uuid.uuid4()),
+                input_data=input_data,
+                output_data=prediction,
+                latency_ms=response_time,
+                timestamp=datetime.utcnow(),
+                api_endpoint="/predict",
+                success=(status == "success"),
+                error_message=None if status == "success" else status
+            )
+            
+            session.add(log_entry)
+            session.commit()
+            logger.info(f"Logged prediction for model {model_id}")
+            
+        except Exception as e:
+            logger.error(f"Error logging prediction: {e}")
+            raise
+
+    async def create_alert(self, session, alert_type: str, severity: str, title: str, 
+                         message: str, source_component: str, metadata: Dict[str, Any] = None) -> None:
+        """Create an alert (for test compatibility)"""
+        try:
+            alert = AlertDB(
+                id=str(uuid.uuid4()),
+                severity=severity,
+                component=source_component,
+                title=title,
+                description=message,
+                triggered_at=datetime.utcnow(),
+                additional_data=metadata or {}
+            )
+            
+            session.add(alert)
+            session.commit()
+            logger.info(f"Created {severity} alert: {title}")
+            
+        except Exception as e:
+            logger.error(f"Error creating alert: {e}")
+            raise
 
 
 # Global monitoring service instance

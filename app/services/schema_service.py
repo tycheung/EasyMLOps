@@ -417,6 +417,125 @@ class SchemaService:
             logger.error(f"Validation error for model {model_id}: {e}")
             return False, str(e), None
 
+    def validate_input_schema(self, schema: Dict[str, Any], data: Dict[str, Any]) -> Tuple[bool, List[str]]:
+        """Validate data against a JSON schema (for test compatibility)"""
+        try:
+            import jsonschema
+            
+            jsonschema.validate(instance=data, schema=schema)
+            return True, []
+        except Exception as e:
+            return False, [str(e)]
+
+    def generate_schema_from_data(self, sample_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Generate a JSON schema from sample data (for test compatibility)"""
+        try:
+            if sample_data is None:
+                return {"type": "object", "properties": {}}
+            
+            properties = {}
+            required = []
+            
+            for key, value in sample_data.items():
+                if isinstance(value, int):
+                    properties[key] = {"type": "number"}
+                elif isinstance(value, float):
+                    properties[key] = {"type": "number"}
+                elif isinstance(value, str):
+                    properties[key] = {"type": "string"}
+                elif isinstance(value, bool):
+                    properties[key] = {"type": "boolean"}
+                elif isinstance(value, list):
+                    properties[key] = {"type": "array"}
+                elif isinstance(value, dict):
+                    properties[key] = {"type": "object"}
+                else:
+                    properties[key] = {"type": "string"}
+                
+                required.append(key)
+            
+            return {
+                "type": "object",
+                "properties": properties,
+                "required": required
+            }
+        except Exception as e:
+            logger.error(f"Error generating schema from data: {e}")
+            return {"type": "object", "properties": {}}
+
+    def merge_schemas(self, schema1: Dict[str, Any], schema2: Dict[str, Any]) -> Dict[str, Any]:
+        """Merge two JSON schemas (for test compatibility)"""
+        try:
+            merged = {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+            
+            # Merge properties
+            if "properties" in schema1:
+                merged["properties"].update(schema1["properties"])
+            if "properties" in schema2:
+                merged["properties"].update(schema2["properties"])
+            
+            # Merge required fields
+            if "required" in schema1:
+                merged["required"].extend(schema1["required"])
+            if "required" in schema2:
+                merged["required"].extend(schema2["required"])
+            
+            # Remove duplicates from required
+            merged["required"] = list(set(merged["required"]))
+            
+            return merged
+        except Exception as e:
+            logger.error(f"Error merging schemas: {e}")
+            return {"type": "object", "properties": {}}
+
+    def convert_to_openapi_schema(self, json_schema: Dict[str, Any]) -> Dict[str, Any]:
+        """Convert JSON schema to OpenAPI schema (for test compatibility)"""
+        try:
+            # For simplicity, just return the same schema as OpenAPI 3.0 uses JSON Schema
+            return json_schema.copy()
+        except Exception as e:
+            logger.error(f"Error converting to OpenAPI schema: {e}")
+            return {}
+
+    def validate_schema_compatibility(self, old_schema: Dict[str, Any], new_schema: Dict[str, Any]) -> Tuple[bool, List[str]]:
+        """Validate compatibility between two schemas (for test compatibility)"""
+        try:
+            issues = []
+            
+            old_properties = old_schema.get("properties", {})
+            new_properties = new_schema.get("properties", {})
+            old_required = set(old_schema.get("required", []))
+            new_required = set(new_schema.get("required", []))
+            
+            # Check if any required fields were removed
+            removed_required = old_required - new_required
+            if removed_required:
+                issues.append(f"Removed required fields: {list(removed_required)}")
+            
+            # Check if any properties were removed
+            removed_properties = set(old_properties.keys()) - set(new_properties.keys())
+            if removed_properties:
+                issues.append(f"Removed properties: {list(removed_properties)}")
+            
+            # Check if property types changed incompatibly
+            for prop in old_properties:
+                if prop in new_properties:
+                    old_type = old_properties[prop].get("type")
+                    new_type = new_properties[prop].get("type")
+                    if old_type != new_type:
+                        issues.append(f"Property '{prop}' type changed from {old_type} to {new_type}")
+            
+            is_compatible = len(issues) == 0
+            return is_compatible, issues
+            
+        except Exception as e:
+            logger.error(f"Error validating schema compatibility: {e}")
+            return False, [str(e)]
+
 
 # Global schema service instance
 schema_service = SchemaService() 

@@ -2,29 +2,123 @@
 Pytest configuration and fixtures for EasyMLOps tests
 """
 
-import pytest
-import asyncio
 import os
 import tempfile
 import shutil
+from pathlib import Path
+import uuid
+
+# IMPORTANT: Set environment variables BEFORE any app imports
+# This ensures the database configuration is correct from the start
+TEST_DIR = tempfile.mkdtemp(prefix="easymlops_test_")
+TEST_DATABASE_PATH = Path(TEST_DIR) / "test.db"
+TEST_DATABASE_URL = f"sqlite:///{TEST_DATABASE_PATH}"
+
+# Store original environment for config tests
+_original_env = {}
+
+def setup_test_environment():
+    """Set up test environment, preserving original for config tests"""
+    global _original_env
+    
+    # Store original environment variables
+    env_vars_to_preserve = [
+        "USE_SQLITE", "SQLITE_PATH", "DATABASE_URL", 
+        "DB_HOST", "DB_PORT", "DB_USER", "DB_PASSWORD", "DB_NAME",
+        "MODELS_DIR", "BENTOS_DIR", "STATIC_DIR"
+    ]
+    
+    for var in env_vars_to_preserve:
+        _original_env[var] = os.environ.get(var)
+    
+    # Set SQLite configuration for most tests
+    os.environ["USE_SQLITE"] = "true"
+    os.environ["SQLITE_PATH"] = str(TEST_DATABASE_PATH)
+    os.environ["DATABASE_URL"] = TEST_DATABASE_URL
+    
+    # Disable monitoring service during tests to prevent database conflicts
+    os.environ["DISABLE_MONITORING"] = "true"
+    
+    # Set other test environment variables
+    os.environ["MODELS_DIR"] = str(Path(TEST_DIR) / "models")
+    os.environ["BENTOS_DIR"] = str(Path(TEST_DIR) / "bentos")
+    os.environ["STATIC_DIR"] = str(Path(TEST_DIR) / "static")
+    
+    # Create test directories
+    os.makedirs(os.environ["MODELS_DIR"], exist_ok=True)
+    os.makedirs(os.environ["BENTOS_DIR"], exist_ok=True)
+    os.makedirs(os.environ["STATIC_DIR"], exist_ok=True)
+
+# Set up the test environment
+setup_test_environment()
+
+# Now we can safely import the app modules
+import pytest
+import asyncio
 from typing import AsyncGenerator, Generator
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
+from sqlmodel import Session
 
-from app.main import app
-from app.database import get_db, Base
+# Import app creation function instead of the app itself
+from app.main import create_app
+from app.database import get_db, engine
 from app.config import get_settings
-from app.models.model import Model, Deployment
+from app.models.model import Model, ModelDeployment
 from app.models.monitoring import (
-    PredictionLog, ModelPerformanceMetric, SystemHealthMetric,
-    Alert, AuditLog
+    PredictionLogDB, ModelPerformanceMetricsDB, SystemHealthMetricDB,
+    AlertDB, AuditLogDB
 )
 
 
-# Test database URL - use in-memory SQLite for tests
-TEST_DATABASE_URL = "sqlite:///./test.db"
+# Global test app - will be created once
+_test_app = None
+
+
+def get_test_app():
+    """Get or create the test app instance"""
+    global _test_app
+    if _test_app is None:
+        # Set global settings and logger for app creation
+        from app.main import settings, logger
+        if settings is None:
+            from app.config import get_settings
+            from app.utils.logging import setup_logging, get_logger
+            import app.main
+            app.main.settings = get_settings()
+            setup_logging()
+            app.main.logger = get_logger(__name__)
+        
+        _test_app = create_app()
+    return _test_app
+
+
+def pytest_configure(config):
+    """Configure pytest - environment variables already set above"""
+    pass  # Environment variables are already set at module level
+
+
+def pytest_unconfigure(config):
+    """Clean up after tests"""
+    # Remove temporary test directory
+    if os.path.exists(TEST_DIR):
+        shutil.rmtree(TEST_DIR, ignore_errors=True)
+
+
+@pytest.fixture(scope="session", autouse=True)
+def setup_test_database():
+    """Set up the test database once for the entire test session"""
+    # Import here to ensure environment variables are set
+    from app.database import create_tables
+    from sqlmodel import SQLModel
+    from app.database import Base
+    
+    # Create all tables
+    SQLModel.metadata.create_all(engine)
+    Base.metadata.create_all(engine)
+    
+    yield
+    
+    # Cleanup happens in pytest_unconfigure
 
 
 @pytest.fixture(scope="session")
@@ -35,71 +129,91 @@ def event_loop():
     loop.close()
 
 
-@pytest.fixture(scope="session")
-def test_settings():
-    """Test settings configuration"""
-    settings = get_settings()
-    settings.DATABASE_URL = TEST_DATABASE_URL
-    settings.DEBUG = True
-    settings.MODELS_DIR = tempfile.mkdtemp()
-    settings.BENTOS_DIR = tempfile.mkdtemp()
-    settings.STATIC_DIR = tempfile.mkdtemp()
-    return settings
+def cleanup_test_database():
+    """Utility function to clean up all test data from the database"""
+    max_retries = 3
+    retry_delay = 0.1  # Start with 100ms delay
+    
+    for attempt in range(max_retries):
+        try:
+            with Session(engine) as session:
+                # Import all model classes that might have data
+                from app.models.model import Model, ModelDeployment
+                from app.models.monitoring import (
+                    PredictionLogDB, ModelPerformanceMetricsDB, SystemHealthMetricDB,
+                    AlertDB, AuditLogDB
+                )
+                
+                # Delete in reverse dependency order to avoid foreign key issues
+                session.query(AlertDB).delete()
+                session.query(AuditLogDB).delete()
+                session.query(SystemHealthMetricDB).delete()
+                session.query(ModelPerformanceMetricsDB).delete()
+                session.query(PredictionLogDB).delete()
+                session.query(ModelDeployment).delete()
+                session.query(Model).delete()
+                
+                # Commit the cleanup
+                session.commit()
+                return  # Success, exit retry loop
+                
+        except Exception as e:
+            if "closed database" not in str(e).lower():
+                if attempt < max_retries - 1:
+                    import time
+                    print(f"Warning: Database cleanup attempt {attempt + 1} failed: {e}. Retrying...")
+                    time.sleep(retry_delay)
+                    retry_delay *= 2  # Exponential backoff
+                else:
+                    print(f"Warning: Database cleanup failed after {max_retries} attempts: {e}")
 
 
-@pytest.fixture(scope="function")
-def test_engine(test_settings):
-    """Create test database engine"""
-    engine = create_engine(
-        TEST_DATABASE_URL,
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
-    
-    # Create tables
-    Base.metadata.create_all(bind=engine)
-    
-    yield engine
-    
-    # Clean up
-    Base.metadata.drop_all(bind=engine)
-    engine.dispose()
-    
-    # Remove test database file
-    if os.path.exists("test.db"):
-        os.remove("test.db")
+@pytest.fixture(autouse=True)
+def ensure_clean_database():
+    """Ensure database is clean before each test starts"""
+    # Clean up before test
+    cleanup_test_database()
+    yield
+    # Cleanup after test is handled by test_session fixture
 
 
-@pytest.fixture(scope="function")
-def test_session(test_engine):
-    """Create test database session"""
-    TestingSessionLocal = sessionmaker(
-        autocommit=False, autoflush=False, bind=test_engine
-    )
-    
-    session = TestingSessionLocal()
+@pytest.fixture
+def test_session():
+    """Create a test database session for each test with proper cleanup and connection management"""
+    session = None
     try:
+        session = Session(engine)
         yield session
+        
     finally:
-        session.close()
+        # Clean up after test - ensure test isolation
+        if session:
+            try:
+                # First rollback any uncommitted changes
+                session.rollback()
+                session.close()  # Explicitly close the session
+                
+            except Exception as e:
+                if "closed database" not in str(e).lower():
+                    print(f"Warning: Session cleanup failed: {e}")
+        
+        # Then clean up all test data
+        cleanup_test_database()
 
 
-@pytest.fixture(scope="function")
-def client(test_session, test_settings):
+@pytest.fixture
+def client(test_session):
     """Create test client with database dependency override"""
     
     def override_get_db():
-        try:
-            yield test_session
-        finally:
-            pass
+        yield test_session
     
-    app.dependency_overrides[get_db] = override_get_db
+    get_test_app().dependency_overrides[get_db] = override_get_db
     
-    with TestClient(app) as test_client:
+    with TestClient(get_test_app()) as test_client:
         yield test_client
     
-    app.dependency_overrides.clear()
+    get_test_app().dependency_overrides.clear()
 
 
 @pytest.fixture
@@ -111,26 +225,9 @@ def sample_model_data():
         "model_type": "classification",
         "framework": "sklearn",
         "version": "1.0.0",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "feature1": {"type": "number"},
-                "feature2": {"type": "string"}
-            },
-            "required": ["feature1", "feature2"]
-        },
-        "output_schema": {
-            "type": "object",
-            "properties": {
-                "prediction": {"type": "string"},
-                "probability": {"type": "number"}
-            }
-        },
-        "performance_metrics": {
-            "accuracy": 0.95,
-            "precision": 0.93,
-            "recall": 0.97
-        }
+        "file_name": "test_model.joblib",
+        "file_size": 1024,
+        "file_hash": f"sample_hash_{uuid.uuid4().hex[:8]}"  # Unique hash for each usage
     }
 
 
@@ -138,18 +235,16 @@ def sample_model_data():
 def sample_deployment_data():
     """Sample deployment data for testing"""
     return {
-        "name": "test_deployment",
-        "description": "A test deployment",
-        "endpoint_url": "http://localhost:3001",
-        "environment": "test",
-        "resources": {
+        "deployment_name": "test_deployment",
+        "deployment_url": "http://localhost:3001",
+        "status": "pending",
+        "configuration": {
             "cpu": "100m",
             "memory": "256Mi"
         },
-        "scaling": {
-            "min_replicas": 1,
-            "max_replicas": 3
-        }
+        "cpu_request": 0.1,
+        "memory_request": "256Mi",
+        "replicas": 1
     }
 
 
@@ -163,12 +258,24 @@ def sample_prediction_data():
 
 
 @pytest.fixture
-def test_model(test_session, sample_model_data):
-    """Create a test model in the database"""
-    model = Model(**sample_model_data)
+def test_model(test_session):
+    """Create a test model instance for testing"""
+    model = Model(
+        name="test_model",
+        description="A test model for unit testing",
+        model_type="classification",
+        framework="sklearn",
+        version="1.0.0",
+        file_name="test_model.joblib",
+        file_size=1024,
+        file_hash=f"test_hash_{uuid.uuid4().hex[:8]}",  # Unique hash for each test
+        status="uploaded"
+    )
+    
     test_session.add(model)
     test_session.commit()
     test_session.refresh(model)
+    
     return model
 
 
@@ -177,7 +284,7 @@ def test_deployment(test_session, test_model, sample_deployment_data):
     """Create a test deployment in the database"""
     deployment_data = sample_deployment_data.copy()
     deployment_data["model_id"] = test_model.id
-    deployment = Deployment(**deployment_data)
+    deployment = ModelDeployment(**deployment_data)
     test_session.add(deployment)
     test_session.commit()
     test_session.refresh(deployment)
@@ -211,12 +318,15 @@ def temp_model_file():
 @pytest.fixture
 def mock_prediction_log(test_session, test_model):
     """Create a mock prediction log for testing"""
-    log = PredictionLog(
+    log = PredictionLogDB(
+        id="test_log_123",
         model_id=test_model.id,
+        request_id="req_123",
         input_data={"feature1": 0.5, "feature2": "test"},
-        prediction={"prediction": "class_a", "probability": 0.85},
-        response_time_ms=150.5,
-        status="success"
+        output_data={"prediction": "class_a", "probability": 0.85},
+        latency_ms=150.5,
+        api_endpoint="/predict",
+        success=True
     )
     test_session.add(log)
     test_session.commit()
@@ -227,11 +337,25 @@ def mock_prediction_log(test_session, test_model):
 @pytest.fixture
 def mock_performance_metric(test_session, test_model):
     """Create a mock performance metric for testing"""
-    metric = ModelPerformanceMetric(
+    from datetime import datetime, timedelta
+    now = datetime.utcnow()
+    
+    metric = ModelPerformanceMetricsDB(
+        id="test_metric_123",
         model_id=test_model.id,
-        metric_name="accuracy",
-        metric_value=0.95,
-        evaluation_data={"test_samples": 100}
+        time_window_start=now - timedelta(hours=1),
+        time_window_end=now,
+        total_requests=100,
+        successful_requests=95,
+        failed_requests=5,
+        requests_per_minute=10.0,
+        avg_latency_ms=150.0,
+        p50_latency_ms=140.0,
+        p95_latency_ms=200.0,
+        p99_latency_ms=250.0,
+        max_latency_ms=300.0,
+        success_rate=0.95,
+        error_rate=0.05
     )
     test_session.add(metric)
     test_session.commit()
@@ -242,29 +366,17 @@ def mock_performance_metric(test_session, test_model):
 @pytest.fixture
 def mock_system_health_metric(test_session):
     """Create a mock system health metric for testing"""
-    metric = SystemHealthMetric(
-        component_name="api_server",
-        metric_name="cpu_usage",
-        metric_value=45.2,
-        unit="percentage",
-        threshold_warning=70.0,
-        threshold_critical=90.0
+    metric = SystemHealthMetricDB(
+        id="test_health_123",
+        component="api_server",
+        metric_type="cpu_usage",
+        value=45.2,
+        unit="percentage"
     )
     test_session.add(metric)
     test_session.commit()
     test_session.refresh(metric)
     return metric
-
-
-@pytest.fixture(scope="session", autouse=True)
-def cleanup_test_dirs():
-    """Clean up test directories after test session"""
-    yield
-    
-    # Clean up any test directories
-    for dir_name in ["test_models", "test_bentos", "test_static"]:
-        if os.path.exists(dir_name):
-            shutil.rmtree(dir_name)
 
 
 @pytest.fixture
@@ -307,3 +419,91 @@ class AsyncMock:
 def async_mock():
     """Factory for creating async mocks"""
     return AsyncMock 
+
+
+@pytest.fixture(autouse=True)
+def reset_config_for_config_tests(request):
+    """Reset environment for config tests that need to test PostgreSQL or default settings"""
+    # Check if this is a config test that needs original environment
+    if "test_config.py" in str(request.fspath) and (
+        "database_url" in request.node.name.lower() or
+        "postgresql" in request.node.name.lower() or
+        "complete_configuration" in request.node.name.lower() or
+        "file_settings_defaults" in request.node.name.lower() or
+        "environment_variable_precedence" in request.node.name.lower()
+    ):
+        # Temporarily restore original environment for these specific tests
+        for var, value in _original_env.items():
+            if value is not None:
+                os.environ[var] = value
+            else:
+                os.environ.pop(var, None)
+        
+        yield
+        
+        # Restore test environment after the config test
+        setup_test_environment()
+    else:
+        # Regular test - keep SQLite configuration
+        yield
+
+
+@pytest.fixture
+def isolated_test_session():
+    """
+    Create an isolated test database session that uses transactions for better isolation.
+    This is an alternative to test_session for tests that need stronger isolation guarantees.
+    """
+    connection = engine.connect()
+    transaction = connection.begin()
+    session = Session(bind=connection)
+    
+    try:
+        yield session
+    finally:
+        session.close()
+        transaction.rollback()  # Always rollback the transaction
+        connection.close() 
+
+
+@pytest.fixture
+def robust_test_session():
+    """
+    Create a more robust test database session with better error handling
+    for tests that experience database locking issues
+    """
+    max_retries = 3
+    retry_delay = 0.1
+    
+    for attempt in range(max_retries):
+        session = None
+        try:
+            session = Session(engine)
+            yield session
+            return  # Success, exit retry loop
+            
+        except Exception as e:
+            if session:
+                try:
+                    session.rollback()
+                    session.close()
+                except:
+                    pass
+            
+            if attempt < max_retries - 1:
+                import time
+                print(f"Warning: Session creation attempt {attempt + 1} failed: {e}. Retrying...")
+                time.sleep(retry_delay)
+                retry_delay *= 2
+            else:
+                raise  # Re-raise the exception after all retries
+        
+        finally:
+            if session:
+                try:
+                    session.close()
+                except:
+                    pass
+            
+            # Clean up test data
+            cleanup_test_database() 

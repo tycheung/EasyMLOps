@@ -1,14 +1,17 @@
 """
 Database connection and session management for EasyMLOps
-Handles PostgreSQL connection with SQLModel, session lifecycle, and database utilities
+Handles PostgreSQL and SQLite connections with SQLModel, session lifecycle, and database utilities
 """
 
 from sqlmodel import create_engine, SQLModel, Session
-from sqlalchemy.pool import StaticPool
+from sqlalchemy.pool import StaticPool, QueuePool
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker
 import logging
 from typing import Generator, AsyncGenerator
 from contextlib import asynccontextmanager
+import os
 
 from app.config import get_settings
 
@@ -18,23 +21,63 @@ settings = get_settings()
 # Configure logging
 logger = logging.getLogger(__name__)
 
-# Create SQLModel engine
-engine = create_engine(
-    str(settings.DATABASE_URL),
-    poolclass=StaticPool,
-    pool_pre_ping=True,
-    pool_recycle=300,
-    echo=settings.DEBUG,  # Log SQL queries in debug mode
-)
+def create_database_engine():
+    """Create database engine based on configuration"""
+    database_url = str(settings.DATABASE_URL)
+    
+    if settings.is_sqlite():
+        # SQLite configuration
+        # Ensure the directory exists for the SQLite file
+        sqlite_path = settings.SQLITE_PATH
+        sqlite_dir = os.path.dirname(sqlite_path)
+        if sqlite_dir and not os.path.exists(sqlite_dir):
+            os.makedirs(sqlite_dir, exist_ok=True)
+        
+        return create_engine(
+            database_url,
+            poolclass=StaticPool,
+            connect_args={
+                "check_same_thread": False,  # Allow SQLite to be used in multiple threads
+                "timeout": 20  # Timeout for database operations
+            },
+            echo=settings.DEBUG,  # Log SQL queries in debug mode
+        )
+    else:
+        # PostgreSQL configuration
+        return create_engine(
+            database_url,
+            poolclass=QueuePool,
+            pool_pre_ping=True,
+            pool_recycle=300,
+            pool_size=5,
+            max_overflow=10,
+            echo=settings.DEBUG,  # Log SQL queries in debug mode
+        )
 
-# Create async engine for async operations
-async_database_url = str(settings.DATABASE_URL).replace('postgresql://', 'postgresql+asyncpg://')
-async_engine = create_async_engine(
-    async_database_url,
-    pool_pre_ping=True,
-    pool_recycle=300,
-    echo=settings.DEBUG,
-)
+def create_async_database_engine():
+    """Create async database engine based on configuration"""
+    if settings.is_sqlite():
+        # SQLite async using aiosqlite
+        database_url = str(settings.DATABASE_URL).replace('sqlite:///', 'sqlite+aiosqlite:///')
+        return create_async_engine(
+            database_url,
+            poolclass=StaticPool,
+            connect_args={"check_same_thread": False},
+            echo=settings.DEBUG,
+        )
+    else:
+        # PostgreSQL async using asyncpg
+        async_database_url = str(settings.DATABASE_URL).replace('postgresql://', 'postgresql+asyncpg://')
+        return create_async_engine(
+            async_database_url,
+            pool_pre_ping=True,
+            pool_recycle=300,
+            echo=settings.DEBUG,
+        )
+
+# Create database engines
+engine = create_database_engine()
+async_engine = create_async_database_engine()
 
 # Create async session maker
 AsyncSessionLocal = async_sessionmaker(
@@ -43,6 +86,15 @@ AsyncSessionLocal = async_sessionmaker(
     expire_on_commit=False
 )
 
+# Compatibility exports for existing models and tests
+# For SQLAlchemy-style models
+Base = declarative_base()
+
+# For traditional SQLAlchemy sessionmaker
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+# For SQLModel (recommended for new models)
+SQLModelBase = SQLModel
 
 def get_db() -> Generator[Session, None, None]:
     """
@@ -76,9 +128,24 @@ async def get_session() -> AsyncGenerator[AsyncSession, None]:
 async def init_db():
     """Initialize database tables"""
     try:
+        # Initialize SQLite database file if needed
+        if settings.is_sqlite():
+            from app.config import init_sqlite_database
+            init_sqlite_database()
+        
+        # Import all models to ensure they're registered with metadata
+        from app.models.model import Model, ModelDeployment
+        from app.models.monitoring import (
+            PredictionLogDB, ModelPerformanceMetricsDB, SystemHealthMetricDB,
+            AlertDB, AuditLogDB
+        )
+        
         # Create tables synchronously (SQLModel doesn't support async table creation yet)
+        # Create SQLModel tables
         SQLModel.metadata.create_all(engine)
-        logger.info("Database initialized successfully")
+        # Create SQLAlchemy Base tables
+        Base.metadata.create_all(engine)
+        logger.info(f"Database initialized successfully using {settings.get_db_type()}")
     except Exception as e:
         logger.error(f"Error initializing database: {e}")
         raise
@@ -87,7 +154,10 @@ async def init_db():
 async def close_db():
     """Close database connections"""
     try:
-        await async_engine.dispose()
+        if not settings.is_sqlite():
+            # Only dispose async engine for PostgreSQL
+            await async_engine.dispose()
+        engine.dispose()
         logger.info("Database connections closed")
     except Exception as e:
         logger.error(f"Error closing database connections: {e}")
@@ -96,8 +166,23 @@ async def close_db():
 def create_tables():
     """Create all database tables"""
     try:
+        # Initialize SQLite database file if needed
+        if settings.is_sqlite():
+            from app.config import init_sqlite_database
+            init_sqlite_database()
+        
+        # Import all models to ensure they're registered with metadata
+        from app.models.model import Model, ModelDeployment
+        from app.models.monitoring import (
+            PredictionLogDB, ModelPerformanceMetricsDB, SystemHealthMetricDB,
+            AlertDB, AuditLogDB
+        )
+        
+        # Create SQLModel tables
         SQLModel.metadata.create_all(engine)
-        logger.info("Database tables created successfully")
+        # Create SQLAlchemy Base tables  
+        Base.metadata.create_all(engine)
+        logger.info(f"Database tables created successfully using {settings.get_db_type()}")
     except Exception as e:
         logger.error(f"Error creating database tables: {e}")
         raise
@@ -106,7 +191,10 @@ def create_tables():
 def drop_tables():
     """Drop all database tables (use with caution!)"""
     try:
+        # Drop SQLModel tables
         SQLModel.metadata.drop_all(engine)
+        # Drop SQLAlchemy Base tables
+        Base.metadata.drop_all(engine)
         logger.warning("All database tables dropped")
     except Exception as e:
         logger.error(f"Error dropping database tables: {e}")
@@ -117,8 +205,11 @@ def check_db_connection() -> bool:
     """Check if database connection is working"""
     try:
         with engine.connect() as connection:
-            connection.exec_driver_sql("SELECT 1")
-        logger.info("Database connection successful")
+            if settings.is_sqlite():
+                connection.exec_driver_sql("SELECT 1")
+            else:
+                connection.exec_driver_sql("SELECT 1")
+        logger.info(f"Database connection successful ({settings.get_db_type()})")
         return True
     except Exception as e:
         logger.error(f"Database connection failed: {e}")
@@ -130,7 +221,7 @@ async def check_async_db_connection() -> bool:
     try:
         async with async_engine.connect() as connection:
             await connection.exec_driver_sql("SELECT 1")
-        logger.info("Async database connection successful")
+        logger.info(f"Async database connection successful ({settings.get_db_type()})")
         return True
     except Exception as e:
         logger.error(f"Async database connection failed: {e}")
@@ -177,18 +268,46 @@ def get_db_info() -> dict:
     """Get database connection information"""
     try:
         with engine.connect() as connection:
-            result = connection.exec_driver_sql("SELECT version()")
-            version = result.fetchone()[0]
-            return {
-                "status": "connected",
-                "database_url": str(settings.DATABASE_URL).replace(settings.POSTGRES_PASSWORD, "***"),
-                "version": version,
-                "pool_size": engine.pool.size(),
-                "checked_out_connections": engine.pool.checkedout()
-            }
+            if settings.is_sqlite():
+                # SQLite version query
+                result = connection.exec_driver_sql("SELECT sqlite_version()")
+                version = f"SQLite {result.fetchone()[0]}"
+                
+                return {
+                    "status": "connected",
+                    "database_type": "SQLite",
+                    "database_path": settings.SQLITE_PATH,
+                    "version": version,
+                    "file_exists": os.path.exists(settings.SQLITE_PATH),
+                    "file_size": os.path.getsize(settings.SQLITE_PATH) if os.path.exists(settings.SQLITE_PATH) else 0
+                }
+            else:
+                # PostgreSQL version query
+                result = connection.exec_driver_sql("SELECT version()")
+                version = result.fetchone()[0]
+                
+                # Hide password in URL
+                safe_url = str(settings.DATABASE_URL)
+                if hasattr(settings, 'POSTGRES_PASSWORD') and settings.POSTGRES_PASSWORD:
+                    safe_url = safe_url.replace(settings.POSTGRES_PASSWORD, "***")
+                
+                return {
+                    "status": "connected",
+                    "database_type": "PostgreSQL",
+                    "database_url": safe_url,
+                    "version": version,
+                    "pool_size": engine.pool.size(),
+                    "checked_out_connections": engine.pool.checkedout()
+                }
     except Exception as e:
+        # Hide password in URL for error reporting
+        safe_url = str(settings.DATABASE_URL)
+        if hasattr(settings, 'POSTGRES_PASSWORD') and settings.POSTGRES_PASSWORD:
+            safe_url = safe_url.replace(settings.POSTGRES_PASSWORD, "***")
+        
         return {
             "status": "disconnected",
+            "database_type": settings.get_db_type(),
             "error": str(e),
-            "database_url": str(settings.DATABASE_URL).replace(settings.POSTGRES_PASSWORD, "***")
+            "database_url": safe_url if not settings.is_sqlite() else settings.SQLITE_PATH
         } 
