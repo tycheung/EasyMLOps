@@ -425,14 +425,13 @@ class MonitoringService:
             
             async with get_session() as session:
                 # Check CPU usage
-                cpu_metrics = await session.execute(
-                    session.query(SystemHealthMetricDB).filter(
-                        and_(
-                            SystemHealthMetricDB.metric_type == MetricType.CPU_USAGE.value,
-                            SystemHealthMetricDB.timestamp >= check_window
-                        )
-                    ).all()
+                cpu_stmt = select(SystemHealthMetricDB).where(
+                    and_(
+                        SystemHealthMetricDB.metric_type == MetricType.CPU_USAGE.value,
+                        SystemHealthMetricDB.timestamp >= check_window
+                    )
                 )
+                cpu_metrics = await session.execute(cpu_stmt)
                 
                 recent_cpu = cpu_metrics.scalars().all()
                 if recent_cpu:
@@ -554,47 +553,41 @@ class MonitoringService:
         try:
             async with get_session() as session:
                 # Get basic counts
-                total_models = await session.execute(
-                    session.query(func.count(Model.id)).scalar()
-                )
+                total_models_stmt = select(func.count(Model.id))
+                total_models = await session.execute(total_models_stmt)
                 
-                active_deployments = await session.execute(
-                    session.query(func.count(ModelDeployment.id)).filter(
-                        ModelDeployment.status == "active"
-                    ).scalar()
+                active_deployments_stmt = select(func.count(ModelDeployment.id)).where(
+                    ModelDeployment.status == "active"
                 )
+                active_deployments = await session.execute(active_deployments_stmt)
                 
                 # Get today's predictions
                 today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
-                today_predictions = await session.execute(
-                    session.query(func.count(PredictionLogDB.id)).filter(
-                        PredictionLogDB.timestamp >= today_start
-                    ).scalar()
+                today_predictions_stmt = select(func.count(PredictionLogDB.id)).where(
+                    PredictionLogDB.timestamp >= today_start
                 )
+                today_predictions = await session.execute(today_predictions_stmt)
                 
                 # Get today's average response time
-                today_avg_latency = await session.execute(
-                    session.query(func.avg(PredictionLogDB.latency_ms)).filter(
-                        PredictionLogDB.timestamp >= today_start
-                    ).scalar()
+                today_avg_latency_stmt = select(func.avg(PredictionLogDB.latency_ms)).where(
+                    PredictionLogDB.timestamp >= today_start
                 )
+                today_avg_latency = await session.execute(today_avg_latency_stmt)
                 
                 # Get active alerts
-                active_alerts = await session.execute(
-                    session.query(func.count(AlertDB.id)).filter(
-                        AlertDB.is_active == True
-                    ).scalar()
+                active_alerts_stmt = select(func.count(AlertDB.id)).where(
+                    AlertDB.is_active == True
                 )
+                active_alerts = await session.execute(active_alerts_stmt)
                 
                 # Get system health metrics
                 health_status = await self.get_system_health_status()
                 
                 # Get recent deployments
-                recent_deployments_query = await session.execute(
-                    session.query(ModelDeployment).order_by(
-                        desc(ModelDeployment.created_at)
-                    ).limit(5).all()
-                )
+                recent_deployments_stmt = select(ModelDeployment).order_by(
+                    desc(ModelDeployment.created_at)
+                ).limit(5)
+                recent_deployments_query = await session.execute(recent_deployments_stmt)
                 recent_deployments = [
                     {
                         "id": dep.id,
@@ -666,7 +659,8 @@ class MonitoringService:
                 start_time = current_time - timedelta(minutes=5)
                 
                 async with get_session() as session:
-                    models = await session.execute(session.query(Model).all())
+                    models_stmt = select(Model)
+                    models = await session.execute(models_stmt)
                     
                     for model in models.scalars():
                         metrics = await self.get_model_performance_metrics(

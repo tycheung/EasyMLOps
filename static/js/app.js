@@ -17,6 +17,7 @@ document.addEventListener('DOMContentLoaded', function() {
     setupFileUpload();
     setupForms();
     loadDashboardData();
+    loadCustomTemplates(); // Load custom templates from localStorage
     
     // Auto-refresh dashboard every 30 seconds
     setInterval(loadDashboardData, 30000);
@@ -361,8 +362,8 @@ function removeField(fieldId) {
 // Schema Template Loading
 async function loadTemplate(templateName) {
     try {
-        const templates = await apiCall('/models/templates/common');
-        const template = templates.templates[templateName];
+        const templates = getBuiltInTemplates();
+        const template = templates[templateName];
         
         if (!template) {
             showNotification('Template not found', 'error');
@@ -395,11 +396,188 @@ async function loadTemplate(templateName) {
             toggleSchemaConfig();
         }
         
-        showNotification(`Loaded ${templateName} template`, 'success');
+        showNotification(`Loaded ${template.name} template`, 'success');
         
     } catch (error) {
         console.error('Error loading template:', error);
+        showNotification('Error loading template: ' + error.message, 'error');
     }
+}
+
+// Built-in Schema Templates
+function getBuiltInTemplates() {
+    return {
+        'house_price_prediction': {
+            name: 'House Price Prediction',
+            description: 'Real estate price prediction model template',
+            input_schema: {
+                fields: [
+                    {
+                        name: 'square_feet',
+                        data_type: 'number',
+                        description: 'Total square footage of the house',
+                        required: true,
+                        min_value: 500,
+                        max_value: 10000
+                    },
+                    {
+                        name: 'bedrooms',
+                        data_type: 'integer',
+                        description: 'Number of bedrooms',
+                        required: true,
+                        min_value: 1,
+                        max_value: 10
+                    },
+                    {
+                        name: 'bathrooms',
+                        data_type: 'number',
+                        description: 'Number of bathrooms',
+                        required: true,
+                        min_value: 1,
+                        max_value: 10
+                    },
+                    {
+                        name: 'age',
+                        data_type: 'integer',
+                        description: 'Age of the house in years',
+                        required: true,
+                        min_value: 0,
+                        max_value: 100
+                    },
+                    {
+                        name: 'location_score',
+                        data_type: 'number',
+                        description: 'Location desirability score (1-10)',
+                        required: false,
+                        min_value: 1,
+                        max_value: 10
+                    }
+                ]
+            },
+            output_schema: {
+                fields: [
+                    {
+                        name: 'predicted_price',
+                        data_type: 'number',
+                        description: 'Predicted house price in USD'
+                    },
+                    {
+                        name: 'confidence_score',
+                        data_type: 'number',
+                        description: 'Model confidence (0-1)'
+                    },
+                    {
+                        name: 'price_range',
+                        data_type: 'object',
+                        description: 'Price range estimate with min/max'
+                    }
+                ]
+            }
+        },
+        'classification': {
+            name: 'Binary Classification',
+            description: 'General binary classification model template',
+            input_schema: {
+                fields: [
+                    {
+                        name: 'feature_1',
+                        data_type: 'number',
+                        description: 'First numerical feature',
+                        required: true
+                    },
+                    {
+                        name: 'feature_2',
+                        data_type: 'number',
+                        description: 'Second numerical feature',
+                        required: true
+                    },
+                    {
+                        name: 'feature_3',
+                        data_type: 'number',
+                        description: 'Third numerical feature',
+                        required: false
+                    },
+                    {
+                        name: 'category',
+                        data_type: 'string',
+                        description: 'Categorical feature',
+                        required: false
+                    }
+                ]
+            },
+            output_schema: {
+                fields: [
+                    {
+                        name: 'prediction',
+                        data_type: 'string',
+                        description: 'Predicted class (0 or 1)'
+                    },
+                    {
+                        name: 'probability',
+                        data_type: 'number',
+                        description: 'Probability of positive class'
+                    },
+                    {
+                        name: 'probabilities',
+                        data_type: 'object',
+                        description: 'Full probability distribution'
+                    }
+                ]
+            }
+        },
+        'text_analysis': {
+            name: 'Text Analysis',
+            description: 'Text sentiment and classification template',
+            input_schema: {
+                fields: [
+                    {
+                        name: 'text',
+                        data_type: 'string',
+                        description: 'Input text to analyze',
+                        required: true
+                    },
+                    {
+                        name: 'language',
+                        data_type: 'string',
+                        description: 'Text language (optional)',
+                        required: false
+                    },
+                    {
+                        name: 'max_length',
+                        data_type: 'integer',
+                        description: 'Maximum text length to process',
+                        required: false,
+                        min_value: 10,
+                        max_value: 5000
+                    }
+                ]
+            },
+            output_schema: {
+                fields: [
+                    {
+                        name: 'sentiment',
+                        data_type: 'string',
+                        description: 'Predicted sentiment (positive/negative/neutral)'
+                    },
+                    {
+                        name: 'confidence',
+                        data_type: 'number',
+                        description: 'Sentiment prediction confidence'
+                    },
+                    {
+                        name: 'emotions',
+                        data_type: 'object',
+                        description: 'Detected emotions with scores'
+                    },
+                    {
+                        name: 'keywords',
+                        data_type: 'array',
+                        description: 'Extracted keywords from text'
+                    }
+                ]
+            }
+        }
+    };
 }
 
 function populateFieldFromTemplate(fieldElement, fieldData, isInput) {
@@ -422,6 +600,202 @@ function populateFieldFromTemplate(fieldElement, fieldData, isInput) {
         if (maxField && fieldData.max_value !== undefined) {
             maxField.value = fieldData.max_value;
         }
+    }
+}
+
+// Template Management Functions
+function openSaveTemplateModal() {
+    const inputFields = collectSchemaFields('input-fields');
+    const outputFields = collectSchemaFields('output-fields');
+    
+    if (inputFields.length === 0 && outputFields.length === 0) {
+        showNotification('Please add some schema fields before saving as template', 'warning');
+        return;
+    }
+    
+    // Update template preview
+    updateTemplatePreview(inputFields, outputFields);
+    
+    // Show modal
+    document.getElementById('save-template-modal').classList.remove('hidden');
+}
+
+function closeSaveTemplateModal() {
+    document.getElementById('save-template-modal').classList.add('hidden');
+    document.getElementById('save-template-form').reset();
+    document.getElementById('template-preview').innerHTML = '';
+}
+
+function updateTemplatePreview(inputFields, outputFields) {
+    const preview = document.getElementById('template-preview');
+    preview.innerHTML = `
+        <div class="border rounded p-3 bg-gray-50">
+            <h4 class="font-medium text-sm mb-2">Template Preview:</h4>
+            <div class="text-xs space-y-1">
+                <div><span class="font-medium">Input fields:</span> ${inputFields.length} field(s)</div>
+                <div><span class="font-medium">Output fields:</span> ${outputFields.length} field(s)</div>
+                ${inputFields.length > 0 ? `<div class="text-blue-600">Input: ${inputFields.map(f => f.name).join(', ')}</div>` : ''}
+                ${outputFields.length > 0 ? `<div class="text-green-600">Output: ${outputFields.map(f => f.name).join(', ')}</div>` : ''}
+            </div>
+        </div>
+    `;
+}
+
+function saveTemplate(event) {
+    event.preventDefault();
+    
+    const templateName = document.getElementById('template-name').value.trim();
+    const templateDescription = document.getElementById('template-description').value.trim();
+    
+    if (!templateName) {
+        showNotification('Please enter a template name', 'error');
+        return;
+    }
+    
+    const inputFields = collectSchemaFields('input-fields');
+    const outputFields = collectSchemaFields('output-fields');
+    
+    if (inputFields.length === 0 && outputFields.length === 0) {
+        showNotification('Cannot save empty template', 'error');
+        return;
+    }
+    
+    const template = {
+        id: generateTemplateId(templateName),
+        name: templateName,
+        description: templateDescription,
+        created_at: new Date().toISOString(),
+        input_schema: { fields: inputFields },
+        output_schema: { fields: outputFields }
+    };
+    
+    try {
+        // Save to localStorage (in future, this could be saved to backend)
+        const customTemplates = getCustomTemplates();
+        customTemplates[template.id] = template;
+        localStorage.setItem('easymlops_custom_templates', JSON.stringify(customTemplates));
+        
+        // Update the UI
+        loadCustomTemplates();
+        
+        // Close modal and show success
+        closeSaveTemplateModal();
+        showNotification(`Template "${templateName}" saved successfully!`, 'success');
+        
+    } catch (error) {
+        console.error('Error saving template:', error);
+        showNotification('Error saving template: ' + error.message, 'error');
+    }
+}
+
+function generateTemplateId(name) {
+    return 'custom_' + name.toLowerCase().replace(/[^a-z0-9]/g, '_');
+}
+
+function getCustomTemplates() {
+    try {
+        const stored = localStorage.getItem('easymlops_custom_templates');
+        return stored ? JSON.parse(stored) : {};
+    } catch (error) {
+        console.error('Error loading custom templates:', error);
+        return {};
+    }
+}
+
+function loadCustomTemplates() {
+    const customTemplates = getCustomTemplates();
+    const container = document.getElementById('custom-templates');
+    const section = document.getElementById('custom-templates-section');
+    
+    container.innerHTML = '';
+    
+    if (Object.keys(customTemplates).length === 0) {
+        section.classList.add('hidden');
+        return;
+    }
+    
+    section.classList.remove('hidden');
+    
+    Object.values(customTemplates).forEach(template => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.onclick = () => loadCustomTemplate(template.id);
+        button.className = 'bg-orange-100 hover:bg-orange-200 text-orange-800 px-3 py-1 rounded text-sm relative group';
+        button.innerHTML = `
+            <i class="fas fa-user mr-1"></i>${template.name}
+            <button onclick="deleteCustomTemplate('${template.id}', event)" 
+                    class="ml-2 text-orange-600 hover:text-red-600 opacity-0 group-hover:opacity-100 transition-opacity">
+                <i class="fas fa-times text-xs"></i>
+            </button>
+        `;
+        container.appendChild(button);
+    });
+}
+
+function loadCustomTemplate(templateId) {
+    try {
+        const customTemplates = getCustomTemplates();
+        const template = customTemplates[templateId];
+        
+        if (!template) {
+            showNotification('Template not found', 'error');
+            return;
+        }
+        
+        // Clear existing fields
+        document.getElementById('input-fields').innerHTML = '';
+        document.getElementById('output-fields').innerHTML = '';
+        inputFieldCount = 0;
+        outputFieldCount = 0;
+        
+        // Load input fields
+        template.input_schema.fields.forEach(field => {
+            addInputField();
+            const fieldElement = document.getElementById(`input-field-${inputFieldCount - 1}`);
+            populateFieldFromTemplate(fieldElement, field, true);
+        });
+        
+        // Load output fields
+        template.output_schema.fields.forEach(field => {
+            addOutputField();
+            const fieldElement = document.getElementById(`output-field-${outputFieldCount - 1}`);
+            populateFieldFromTemplate(fieldElement, field, false);
+        });
+        
+        // Show schema config if hidden
+        const schemaConfig = document.getElementById('schema-config');
+        if (schemaConfig.classList.contains('hidden')) {
+            toggleSchemaConfig();
+        }
+        
+        showNotification(`Loaded custom template "${template.name}"`, 'success');
+        
+    } catch (error) {
+        console.error('Error loading custom template:', error);
+        showNotification('Error loading template: ' + error.message, 'error');
+    }
+}
+
+function deleteCustomTemplate(templateId, event) {
+    event.stopPropagation(); // Prevent template loading when delete button is clicked
+    
+    if (!confirm('Are you sure you want to delete this template?')) {
+        return;
+    }
+    
+    try {
+        const customTemplates = getCustomTemplates();
+        const templateName = customTemplates[templateId]?.name || 'Unknown';
+        
+        delete customTemplates[templateId];
+        localStorage.setItem('easymlops_custom_templates', JSON.stringify(customTemplates));
+        
+        loadCustomTemplates();
+        showNotification(`Template "${templateName}" deleted`, 'success');
+        
+    } catch (error) {
+        console.error('Error deleting template:', error);
+        showNotification('Error deleting template: ' + error.message, 'error');
     }
 }
 
@@ -982,6 +1356,11 @@ window.addInputField = addInputField;
 window.addOutputField = addOutputField;
 window.removeField = removeField;
 window.loadTemplate = loadTemplate;
+window.openSaveTemplateModal = openSaveTemplateModal;
+window.closeSaveTemplateModal = closeSaveTemplateModal;
+window.saveTemplate = saveTemplate;
+window.loadCustomTemplate = loadCustomTemplate;
+window.deleteCustomTemplate = deleteCustomTemplate;
 window.clearFile = clearFile;
 window.loadTestInterface = loadTestInterface;
 window.loadExampleData = loadExampleData;

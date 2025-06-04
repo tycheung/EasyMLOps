@@ -6,7 +6,7 @@
     <title>EasyMLOps - Data Scientist Empowerment Platform</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
-    <link href="css/styles.css" rel="stylesheet">
+    <link href="/static/css/styles.css" rel="stylesheet">
     <script src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
     <style>
         .gradient-bg {
@@ -315,20 +315,37 @@
 
                                 <!-- Schema Templates -->
                                 <div class="mt-6 p-4 bg-gray-50 rounded-lg">
-                                    <h6 class="text-sm font-medium text-gray-900 mb-3">Use Template</h6>
-                                    <div class="flex flex-wrap gap-2">
-                                        <button type="button" onclick="loadTemplate('house_price_prediction')" 
-                                                class="bg-blue-100 hover:bg-blue-200 text-blue-800 px-3 py-1 rounded text-sm">
-                                            House Price Prediction
+                                    <div class="flex justify-between items-center mb-3">
+                                        <h6 class="text-sm font-medium text-gray-900">Schema Templates</h6>
+                                        <button type="button" onclick="openSaveTemplateModal()" 
+                                                class="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1 rounded text-sm">
+                                            <i class="fas fa-save mr-1"></i>Save as Template
                                         </button>
-                                        <button type="button" onclick="loadTemplate('classification')" 
-                                                class="bg-green-100 hover:bg-green-200 text-green-800 px-3 py-1 rounded text-sm">
-                                            Binary Classification
-                                        </button>
-                                        <button type="button" onclick="loadTemplate('text_analysis')" 
-                                                class="bg-purple-100 hover:bg-purple-200 text-purple-800 px-3 py-1 rounded text-sm">
-                                            Text Analysis
-                                        </button>
+                                    </div>
+                                    
+                                    <div class="mb-3">
+                                        <h7 class="text-xs font-medium text-gray-700 mb-2 block">Built-in Templates</h7>
+                                        <div class="flex flex-wrap gap-2">
+                                            <button type="button" onclick="loadTemplate('house_price_prediction')" 
+                                                    class="bg-blue-100 hover:bg-blue-200 text-blue-800 px-3 py-1 rounded text-sm">
+                                                <i class="fas fa-home mr-1"></i>House Price Prediction
+                                            </button>
+                                            <button type="button" onclick="loadTemplate('classification')" 
+                                                    class="bg-green-100 hover:bg-green-200 text-green-800 px-3 py-1 rounded text-sm">
+                                                <i class="fas fa-chart-pie mr-1"></i>Binary Classification
+                                            </button>
+                                            <button type="button" onclick="loadTemplate('text_analysis')" 
+                                                    class="bg-purple-100 hover:bg-purple-200 text-purple-800 px-3 py-1 rounded text-sm">
+                                                <i class="fas fa-file-text mr-1"></i>Text Analysis
+                                            </button>
+                                        </div>
+                                    </div>
+                                    
+                                    <div id="custom-templates-section" class="hidden">
+                                        <h7 class="text-xs font-medium text-gray-700 mb-2 block">Your Templates</h7>
+                                        <div id="custom-templates" class="flex flex-wrap gap-2 mb-2">
+                                            <!-- Custom templates will be loaded here -->
+                                        </div>
                                     </div>
                                 </div>
                             </div>
@@ -478,6 +495,55 @@
         </div>
     </div>
 
-    <script src="js/app.js"></script>
+    <!-- Save Template Modal -->
+    <div id="save-template-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
+        <div class="bg-white rounded-lg max-w-md w-full mx-4">
+            <div class="px-6 py-4 border-b border-gray-200">
+                <div class="flex justify-between items-center">
+                    <h3 class="text-lg font-medium text-gray-900">Save Schema Template</h3>
+                    <button onclick="closeSaveTemplateModal()" class="text-gray-400 hover:text-gray-600">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+            </div>
+            <div class="p-6">
+                <form id="save-template-form" onsubmit="saveTemplate(event)">
+                    <div class="space-y-4">
+                        <div>
+                            <label for="template-name" class="block text-sm font-medium text-gray-700 mb-1">
+                                Template Name
+                            </label>
+                            <input type="text" id="template-name" required
+                                   class="w-full border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500"
+                                   placeholder="My Custom Template">
+                        </div>
+                        <div>
+                            <label for="template-description" class="block text-sm font-medium text-gray-700 mb-1">
+                                Description
+                            </label>
+                            <textarea id="template-description" rows="3"
+                                      class="w-full border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500"
+                                      placeholder="Describe what this template is for..."></textarea>
+                        </div>
+                        <div id="template-preview" class="text-sm text-gray-600">
+                            <!-- Template preview will be shown here -->
+                        </div>
+                    </div>
+                    <div class="mt-6 flex justify-end space-x-3">
+                        <button type="button" onclick="closeSaveTemplateModal()" 
+                                class="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50">
+                            Cancel
+                        </button>
+                        <button type="submit" 
+                                class="px-4 py-2 text-sm font-medium text-white bg-indigo-600 border border-transparent rounded-md hover:bg-indigo-700">
+                            <i class="fas fa-save mr-1"></i>Save Template
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/js/app.js"></script>
 </body>
 </html> 
