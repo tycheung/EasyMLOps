@@ -17,7 +17,7 @@ from app.services.monitoring_service import monitoring_service
 from app.database import get_session
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/monitoring", tags=["monitoring"])
+router = APIRouter(tags=["monitoring"])
 
 
 @router.get("/dashboard", response_model=DashboardMetrics)
@@ -37,6 +37,9 @@ async def get_system_health():
     try:
         health_status = await monitoring_service.get_system_health_status()
         return health_status
+    except HTTPException:
+        # Re-raise HTTPExceptions as they are already properly formed
+        raise
     except Exception as e:
         logger.error(f"Error getting system health: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -63,6 +66,9 @@ async def get_model_performance(
             deployment_id=deployment_id
         )
         return metrics
+    except HTTPException:
+        # Re-raise HTTPExceptions as they are already properly formed
+        raise
     except Exception as e:
         logger.error(f"Error getting model performance metrics: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -79,21 +85,22 @@ async def get_alerts(
     try:
         async with get_session() as session:
             from app.models.monitoring import AlertDB
-            from sqlalchemy import and_, desc
-            
-            query = session.query(AlertDB)
-            
+            from sqlalchemy import desc
+            from sqlmodel import select
+
+            stmt = select(AlertDB)
+
             if active_only:
-                query = query.filter(AlertDB.is_active == True)
+                stmt = stmt.where(AlertDB.is_active == True)
             if severity:
-                query = query.filter(AlertDB.severity == severity)
+                stmt = stmt.where(AlertDB.severity == severity)
             if component:
-                query = query.filter(AlertDB.component == component)
-            
-            query = query.order_by(desc(AlertDB.triggered_at)).limit(limit)
-            result = await session.execute(query)
-            alerts = result.scalars().all()
-            
+                stmt = stmt.where(AlertDB.component == component)
+
+            stmt = stmt.order_by(desc(AlertDB.triggered_at)).limit(limit)
+            result = await session.execute(stmt)
+            alerts_db = result.scalars().all()
+
             return [
                 Alert(
                     id=alert.id,
@@ -111,7 +118,7 @@ async def get_alerts(
                     is_active=alert.is_active,
                     is_acknowledged=alert.is_acknowledged
                 )
-                for alert in alerts
+                for alert in alerts_db
             ]
     except Exception as e:
         logger.error(f"Error getting alerts: {e}")

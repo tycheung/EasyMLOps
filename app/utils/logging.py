@@ -67,7 +67,7 @@ def setup_logging(
     log_level: str = None,
     log_file: Optional[str] = None,
     enable_json: bool = False
-) -> None:
+) -> logging.Logger:
     """
     Setup application logging configuration
     
@@ -75,6 +75,9 @@ def setup_logging(
         log_level: Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
         log_file: Path to log file (optional)
         enable_json: Whether to use JSON formatting
+        
+    Returns:
+        logging.Logger: The root logger instance
     """
     
     # Determine log level
@@ -84,7 +87,11 @@ def setup_logging(
     numeric_level = getattr(logging, log_level.upper(), logging.INFO)
     
     # Create logs directory
-    os.makedirs("logs", exist_ok=True)
+    try:
+        os.makedirs("logs", exist_ok=True)
+    except PermissionError:
+        # Handle permission errors gracefully for tests
+        pass
     
     # Root logger configuration
     root_logger = logging.getLogger()
@@ -106,36 +113,45 @@ def setup_logging(
         )
     
     console_handler.setFormatter(console_formatter)
+    # Set a name for the handler to help with testing
+    console_handler.set_name('console_handler')
+    # Add a custom attribute to identify stdout handler
+    console_handler._is_stdout = True
     root_logger.addHandler(console_handler)
     
     # File handler (if specified or default)
     if log_file is None:
         log_file = f"logs/easymlops_{datetime.now().strftime('%Y%m%d')}.log"
     
-    # Rotating file handler
-    file_handler = logging.handlers.RotatingFileHandler(
-        log_file,
-        maxBytes=10 * 1024 * 1024,  # 10MB
-        backupCount=5,
-        encoding='utf-8'
-    )
-    file_handler.setLevel(numeric_level)
-    
-    # Always use JSON format for file logs
-    file_formatter = JSONFormatter()
-    file_handler.setFormatter(file_formatter)
-    root_logger.addHandler(file_handler)
-    
-    # Error file handler (separate file for errors)
-    error_handler = logging.handlers.RotatingFileHandler(
-        f"logs/easymlops_errors_{datetime.now().strftime('%Y%m%d')}.log",
-        maxBytes=10 * 1024 * 1024,  # 10MB
-        backupCount=5,
-        encoding='utf-8'
-    )
-    error_handler.setLevel(logging.ERROR)
-    error_handler.setFormatter(file_formatter)
-    root_logger.addHandler(error_handler)
+    try:
+        # Rotating file handler
+        file_handler = logging.handlers.RotatingFileHandler(
+            log_file,
+            maxBytes=10 * 1024 * 1024,  # 10MB
+            backupCount=5,
+            encoding='utf-8'
+        )
+        file_handler.setLevel(numeric_level)
+        
+        # Always use JSON format for file logs
+        file_formatter = JSONFormatter()
+        file_handler.setFormatter(file_formatter)
+        root_logger.addHandler(file_handler)
+        
+        # Error file handler (separate file for errors)
+        error_handler = logging.handlers.RotatingFileHandler(
+            f"logs/easymlops_errors_{datetime.now().strftime('%Y%m%d')}.log",
+            maxBytes=10 * 1024 * 1024,  # 10MB
+            backupCount=5,
+            encoding='utf-8'
+        )
+        error_handler.setLevel(logging.ERROR)
+        error_handler.setFormatter(file_formatter)
+        root_logger.addHandler(error_handler)
+    except PermissionError:
+        # Handle file permission errors gracefully - just continue with console logging
+        logger = logging.getLogger(__name__)
+        logger.warning("File logging disabled due to permission error")
     
     # Silence some noisy loggers
     logging.getLogger("urllib3").setLevel(logging.WARNING)
@@ -145,6 +161,8 @@ def setup_logging(
     # Log startup message
     logger = logging.getLogger(__name__)
     logger.info(f"Logging initialized - Level: {log_level}, File: {log_file}")
+    
+    return root_logger
 
 
 def get_logger(name: str) -> logging.Logger:

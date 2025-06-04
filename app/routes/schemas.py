@@ -3,9 +3,11 @@ Schema routes for model input/output schema management
 Provides REST API endpoints for defining and managing model schemas
 """
 
-from typing import Dict, Any, Optional
-from fastapi import APIRouter, HTTPException, status
+from typing import Dict, Any, Optional, List
+from fastapi import APIRouter, HTTPException, status, Body
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
+import asyncio
 
 from app.schemas.model import (
     InputSchema,
@@ -19,6 +21,282 @@ from app.services.schema_service import schema_service
 router = APIRouter()
 
 
+# Request/Response models for schema endpoints
+class SchemaValidationRequest(BaseModel):
+    schema: Dict[str, Any]
+    data: Dict[str, Any]
+
+class SchemaValidationResponse(BaseModel):
+    valid: bool
+    errors: List[str] = []
+
+class SchemaGenerationRequest(BaseModel):
+    sample_data: List[Dict[str, Any]]
+    schema_type: str = "input"
+
+class SchemaComparisonRequest(BaseModel):
+    schema1: Dict[str, Any]
+    schema2: Dict[str, Any]
+
+class SchemaVersionRequest(BaseModel):
+    schema_data: Dict[str, Any]
+    version: str
+    description: Optional[str] = None
+    migration_notes: Optional[str] = None
+
+class ModelSchemaRequest(BaseModel):
+    model_id: str
+    schema_type: str
+    schema_data: Dict[str, Any]
+    version: str = "1.0"
+
+
+# General schema endpoints (expected by tests)
+@router.post("/validate", response_model=SchemaValidationResponse)
+async def validate_schema(request: SchemaValidationRequest):
+    """Validate data against a JSON schema"""
+    try:
+        is_valid, errors = await asyncio.to_thread(
+            schema_service.validate_input_schema, 
+            request.schema, 
+            request.data
+        )
+        return SchemaValidationResponse(valid=is_valid, errors=errors)
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Schema validation error: {str(e)}"
+        )
+
+@router.post("/generate")
+async def generate_schema_from_data(request: SchemaGenerationRequest):
+    """Generate JSON schema from sample data"""
+    try:
+        if not request.sample_data:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Sample data cannot be empty"
+            )
+        
+        # Use the first sample to generate schema
+        schema = schema_service.generate_schema_from_data(request.sample_data[0])
+        
+        return {
+            "schema": schema,
+            "schema_type": request.schema_type,
+            "generated_from_samples": len(request.sample_data)
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Schema generation error: {str(e)}"
+        )
+
+@router.post("/compare")
+async def compare_schemas(request: SchemaComparisonRequest):
+    """Compare two schemas for compatibility"""
+    try:
+        result = await asyncio.to_thread(schema_service.compare_schemas, request.schema1, request.schema2)
+        return result
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Schema comparison error: {str(e)}"
+        )
+
+@router.post("/convert")
+async def convert_schema_format(request: Dict[str, Any] = Body(...)):
+    """Convert schema between different formats"""
+    try:
+        schema = request.get("schema")
+        target_format = request.get("target_format", "").lower()
+        
+        if not schema:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Schema is required"
+            )
+        
+        converted_schema: Optional[Dict[str, Any]] = None # Initialize
+        if target_format == "openapi":
+            # converted = schema_service.convert_to_openapi_schema(schema)
+            converted_schema = await asyncio.to_thread(schema_service.convert_to_openapi_schema, schema)
+        elif target_format in ["json", "json_schema"]:
+            # converted = schema_service.convert_to_json_schema(schema)
+            converted_schema = await asyncio.to_thread(schema_service.convert_to_json_schema, schema)
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Unsupported format: {target_format}"
+            )
+        
+        return {
+            "converted_schema": converted_schema,
+            "original_format": "json", # Assuming original is always JSON for this endpoint
+            "target_format": target_format
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Schema conversion error: {str(e)}"
+        )
+
+# Schema versioning endpoints
+@router.get("/{schema_id}/versions")
+async def get_schema_versions(schema_id: str):
+    """Get all versions of a schema"""
+    try:
+        versions = await schema_service.get_schema_versions(schema_id)
+        if not versions:
+            pass
+        return versions
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error retrieving schema versions: {str(e)}"
+        )
+
+@router.post("/{schema_id}/versions", status_code=status.HTTP_201_CREATED)
+async def create_schema_version(schema_id: str, request: SchemaVersionRequest):
+    """Create a new version of a schema"""
+    try:
+        result = await schema_service.create_schema_version(
+            schema_id_base=schema_id, 
+            schema_data=request.schema_data, 
+            version=request.version, 
+            description=request.description
+        )
+        return result
+    except FileExistsError as e:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(e)
+        )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error creating schema version: {str(e)}"
+        )
+
+# Model schema management endpoints
+@router.get("/models/{model_id}")
+async def get_model_schemas_general(model_id: str):
+    """Get schemas for a model (general endpoint)"""
+    try:
+        input_schema, output_schema = await schema_service.get_model_schemas(model_id)
+        
+        if input_schema is None and output_schema is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"No schemas found for model {model_id}"
+            )
+        
+        return {
+            "model_id": model_id,
+            "input_schema": input_schema.dict() if input_schema else None,
+            "output_schema": output_schema.dict() if output_schema else None
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error retrieving model schemas: {str(e)}"
+        )
+
+@router.post("/models", status_code=status.HTTP_201_CREATED)
+async def save_model_schema_general(request: ModelSchemaRequest):
+    """Save a schema for a model (general endpoint)"""
+    try:
+        result = await schema_service.save_model_schema(
+            request.model_id,
+            request.schema_type,
+            request.schema_data,
+            request.version
+        )
+        return result
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error saving model schema: {str(e)}"
+        )
+
+@router.put("/{schema_id}")
+async def update_model_schema_general(schema_id: str, request: Dict[str, Any] = Body(...)):
+    """Update a model schema (general endpoint)"""
+    try:
+        # Ensure schema_data is present in the request body
+        schema_data = request.get("schema_data")
+        if schema_data is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="'schema_data' field is required in the request body."
+            )
+
+        result = await schema_service.update_model_schema(
+            schema_id,
+            schema_data,
+            request.get("version")
+        )
+        return result
+    except FileNotFoundError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(e)
+        )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error updating model schema: {str(e)}"
+        )
+
+@router.delete("/{schema_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_model_schema_general(schema_id: str):
+    """Delete a model schema (general endpoint)"""
+    try:
+        success = await schema_service.delete_model_schema(schema_id)
+        if not success:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Schema {schema_id} not found"
+            )
+        # Return nothing for 204 No Content
+        return
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+    except HTTPException as he:
+        # Re-raise HTTPExceptions as-is
+        raise he
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error deleting model schema: {str(e)}"
+        )
+
+
+# Original model-specific schema endpoints
 @router.post("/{model_id}/schemas", status_code=status.HTTP_201_CREATED)
 async def create_model_schemas(
     model_id: str, 
@@ -249,16 +527,14 @@ async def get_model_openapi_schema(model_id: str):
     
     return {
         "model_id": model_id,
-        "openapi_schema": {
-            "input": openapi_input,
-            "output": openapi_output
-        }
+        "input_schema": openapi_input,
+        "output_schema": openapi_output
     }
 
 
 def _datatype_to_openapi_type(data_type: DataType) -> str:
     """Convert DataType enum to OpenAPI type string"""
-    type_mapping = {
+    mapping = {
         DataType.INTEGER: "integer",
         DataType.FLOAT: "number",
         DataType.STRING: "string",
@@ -268,152 +544,68 @@ def _datatype_to_openapi_type(data_type: DataType) -> str:
         DataType.DATE: "string",
         DataType.DATETIME: "string"
     }
-    return type_mapping.get(data_type, "string")
+    return mapping.get(data_type, "string")
 
 
-# Schema template endpoints for easier setup
 @router.get("/templates/common")
 async def get_common_schema_templates():
     """
-    Get common schema templates
+    Get common schema templates for typical ML use cases
     
-    Returns pre-defined schema templates for common use cases
-    to help users quickly set up schemas for their models.
+    Returns pre-defined schema templates that can be used as starting points
+    for common machine learning scenarios.
     """
     templates = {
         "house_price_prediction": {
-            "description": "Schema for house price prediction model",
-            "input_schema": {
-                "fields": [
-                    {
-                        "name": "square_feet",
-                        "data_type": "float",
-                        "required": True,
-                        "description": "House size in square feet",
-                        "min_value": 100,
-                        "max_value": 10000
-                    },
-                    {
-                        "name": "bedrooms",
-                        "data_type": "integer",
-                        "required": True,
-                        "description": "Number of bedrooms",
-                        "min_value": 1,
-                        "max_value": 10
-                    },
-                    {
-                        "name": "bathrooms",
-                        "data_type": "float",
-                        "required": True,
-                        "description": "Number of bathrooms",
-                        "min_value": 0.5,
-                        "max_value": 10
-                    },
-                    {
-                        "name": "age",
-                        "data_type": "integer",
-                        "required": True,
-                        "description": "House age in years",
-                        "min_value": 0,
-                        "max_value": 200
-                    },
-                    {
-                        "name": "location",
-                        "data_type": "string",
-                        "required": False,
-                        "description": "House location/neighborhood",
-                        "max_length": 100
-                    }
-                ]
+            "input": {
+                "type": "object",
+                "properties": {
+                    "bedrooms": {"type": "integer", "minimum": 1, "maximum": 10},
+                    "bathrooms": {"type": "number", "minimum": 0.5, "maximum": 10},
+                    "sqft": {"type": "number", "minimum": 100},
+                    "location": {"type": "string", "enum": ["urban", "suburban", "rural"]}
+                },
+                "required": ["bedrooms", "bathrooms", "sqft"]
             },
-            "output_schema": {
-                "fields": [
-                    {
-                        "name": "predicted_price",
-                        "data_type": "float",
-                        "description": "Predicted house price in USD"
-                    },
-                    {
-                        "name": "confidence",
-                        "data_type": "float",
-                        "description": "Prediction confidence score"
-                    }
-                ]
+            "output": {
+                "type": "object", 
+                "properties": {
+                    "predicted_price": {"type": "number", "minimum": 0},
+                    "confidence": {"type": "number", "minimum": 0, "maximum": 1}
+                },
+                "required": ["predicted_price", "confidence"]
             }
         },
-        "classification": {
-            "description": "Schema for binary classification model",
-            "input_schema": {
-                "fields": [
-                    {
-                        "name": "feature1",
-                        "data_type": "float",
-                        "required": True,
-                        "description": "First feature"
-                    },
-                    {
-                        "name": "feature2",
-                        "data_type": "float",
-                        "required": True,
-                        "description": "Second feature"
-                    }
-                ]
+        "image_classification": {
+            "input": {
+                "type": "object",
+                "properties": {
+                    "image": {"type": "string", "format": "base64"},
+                    "image_url": {"type": "string", "format": "uri"}
+                }
             },
-            "output_schema": {
-                "fields": [
-                    {
-                        "name": "prediction",
-                        "data_type": "integer",
-                        "description": "Predicted class (0 or 1)"
-                    },
-                    {
-                        "name": "probability",
-                        "data_type": "float",
-                        "description": "Prediction probability"
+            "output": {
+                "type": "object",
+                "properties": {
+                    "predicted_class": {"type": "string"},
+                    "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+                    "top_predictions": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "class": {"type": "string"},
+                                "confidence": {"type": "number"}
+                            }
+                        }
                     }
-                ]
-            }
-        },
-        "text_analysis": {
-            "description": "Schema for text analysis/sentiment model",
-            "input_schema": {
-                "fields": [
-                    {
-                        "name": "text",
-                        "data_type": "string",
-                        "required": True,
-                        "description": "Input text to analyze",
-                        "min_length": 1,
-                        "max_length": 5000
-                    },
-                    {
-                        "name": "language",
-                        "data_type": "string",
-                        "required": False,
-                        "description": "Text language",
-                        "allowed_values": ["en", "es", "fr", "de", "it"],
-                        "default_value": "en"
-                    }
-                ]
-            },
-            "output_schema": {
-                "fields": [
-                    {
-                        "name": "sentiment",
-                        "data_type": "string",
-                        "description": "Detected sentiment"
-                    },
-                    {
-                        "name": "confidence",
-                        "data_type": "float",
-                        "description": "Confidence score"
-                    }
-                ]
+                },
+                "required": ["predicted_class", "confidence"]
             }
         }
     }
     
     return {
         "templates": templates,
-        "description": "Common schema templates for quick model setup"
+        "description": "Common schema templates for ML use cases"
     } 

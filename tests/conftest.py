@@ -7,6 +7,7 @@ import tempfile
 import shutil
 from pathlib import Path
 import uuid
+from datetime import datetime, timedelta, timezone
 
 # IMPORTANT: Set environment variables BEFORE any app imports
 # This ensures the database configuration is correct from the start
@@ -58,6 +59,7 @@ import asyncio
 from typing import AsyncGenerator, Generator
 from fastapi.testclient import TestClient
 from sqlmodel import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 # Import app creation function instead of the app itself
 from app.main import create_app
@@ -67,6 +69,9 @@ from app.models.model import Model, ModelDeployment
 from app.models.monitoring import (
     PredictionLogDB, ModelPerformanceMetricsDB, SystemHealthMetricDB,
     AlertDB, AuditLogDB
+)
+from app.schemas.monitoring import (
+    AlertSeverity, SystemComponent, Alert
 )
 
 
@@ -78,17 +83,22 @@ def get_test_app():
     """Get or create the test app instance"""
     global _test_app
     if _test_app is None:
-        # Set global settings and logger for app creation
-        from app.main import settings, logger
-        if settings is None:
-            from app.config import get_settings
-            from app.utils.logging import setup_logging, get_logger
-            import app.main
-            app.main.settings = get_settings()
-            setup_logging()
-            app.main.logger = get_logger(__name__)
+        # Initialize settings and logger for app creation
+        from app.config import get_settings
+        from app.utils.logging import setup_logging, get_logger
+        import app.main
         
-        _test_app = create_app()
+        # Get settings and logger instances
+        test_settings = get_settings()
+        setup_logging()
+        test_logger = get_logger(__name__)
+        
+        # Set global variables for compatibility
+        app.main.settings = test_settings
+        app.main.logger = test_logger
+        
+        # Create app with explicit settings and logger
+        _test_app = create_app(test_settings, test_logger)
     return _test_app
 
 
@@ -204,10 +214,29 @@ def test_session():
 @pytest.fixture
 def client(test_session):
     """Create test client with database dependency override"""
-    
-    def override_get_db():
-        yield test_session
-    
+    global _test_app # Ensure we are modifying the global _test_app
+    _test_app = None # Force app recreation for this client fixture
+
+    # engine is the synchronous test engine defined in this file
+    async def override_get_db() -> AsyncGenerator[AsyncSession, None]:
+        async_session_for_test = AsyncSession(engine) # Create AsyncSession with the sync test engine
+        try:
+            yield async_session_for_test
+            # The app's get_db will handle commit/rollback based on its logic
+            # We might still want to ensure a final commit or rollback here if the app doesn't always.
+            # For now, let app's get_db manage it.
+        except Exception:
+            # await async_session_for_test.rollback() # App's get_db should handle this
+            raise
+        finally:
+            await async_session_for_test.close()
+            # The original synchronous test_session might be used for direct setup in some tests.
+            # Its cleanup is handled by its own fixture or ensure_clean_database.
+            # cleanup_test_database() is called by ensure_clean_database fixture (autouse=True)
+            # and also within the test_session fixture's finally block.
+            # To avoid duplicate cleanup or potential issues, let's ensure it's called reliably once after.
+            # The ensure_clean_database fixture should handle the main cleanup.
+
     get_test_app().dependency_overrides[get_db] = override_get_db
     
     with TestClient(get_test_app()) as test_client:
@@ -237,14 +266,16 @@ def sample_deployment_data():
     return {
         "deployment_name": "test_deployment",
         "deployment_url": "http://localhost:3001",
-        "status": "pending",
+        "status": "active",
         "configuration": {
             "cpu": "100m",
             "memory": "256Mi"
         },
         "cpu_request": 0.1,
         "memory_request": "256Mi",
-        "replicas": 1
+        "replicas": 1,
+        "framework": "sklearn",
+        "endpoints": ["predict", "predict_proba"]
     }
 
 
@@ -507,3 +538,72 @@ def robust_test_session():
             
             # Clean up test data
             cleanup_test_database() 
+
+
+@pytest.fixture
+def sample_alerts_list(test_session):
+    """Create sample alerts for testing, one active, one inactive"""
+    test_session.query(AlertDB).delete() # Clear existing alerts
+    
+    alert1_data = {
+        "id": "alert_1",
+        "severity": AlertSeverity.WARNING,
+        "component": SystemComponent.API_SERVER,
+        "title": "High CPU Usage",
+        "description": "CPU usage is high",
+        "triggered_at": datetime.now(timezone.utc) - timedelta(hours=1),
+        "is_active": True, # Active
+        "is_acknowledged": False
+    }
+    alert2_data = {
+        "id": "alert_2",
+        "severity": AlertSeverity.CRITICAL,
+        "component": SystemComponent.MODEL_SERVICE,
+        "title": "Model Degradation",
+        "description": "Model accuracy dropped significantly",
+        "triggered_at": datetime.now(timezone.utc) - timedelta(minutes=30),
+        "is_active": True, # <<<< Make this active too
+        "is_acknowledged": False,
+        "affected_models": ["model_abc", "model_xyz"]
+    }
+
+    alert1_db = AlertDB(**alert1_data)
+    alert2_db = AlertDB(**alert2_data)
+    test_session.add_all([alert1_db, alert2_db])
+    test_session.commit()
+
+    # Convert to Alert schema instances manually
+    return [
+        Alert(
+            id=alert1_db.id,
+            severity=alert1_db.severity,
+            component=alert1_db.component,
+            title=alert1_db.title,
+            description=alert1_db.description,
+            triggered_at=alert1_db.triggered_at,
+            resolved_at=alert1_db.resolved_at,
+            acknowledged_at=alert1_db.acknowledged_at,
+            acknowledged_by=alert1_db.acknowledged_by,
+            metric_value=alert1_db.metric_value,
+            threshold_value=alert1_db.threshold_value,
+            affected_models=alert1_db.affected_models or [],
+            is_active=alert1_db.is_active,
+            is_acknowledged=alert1_db.is_acknowledged
+        ),
+        Alert(
+            id=alert2_db.id,
+            severity=alert2_db.severity,
+            component=alert2_db.component,
+            title=alert2_db.title,
+            description=alert2_db.description,
+            triggered_at=alert2_db.triggered_at,
+            resolved_at=alert2_db.resolved_at,
+            acknowledged_at=alert2_db.acknowledged_at,
+            acknowledged_by=alert2_db.acknowledged_by,
+            metric_value=alert2_db.metric_value,
+            threshold_value=alert2_db.threshold_value,
+            affected_models=alert2_db.affected_models or [],
+            is_active=alert2_db.is_active,
+            is_acknowledged=alert2_db.is_acknowledged
+        )
+    ] 

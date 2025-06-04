@@ -7,6 +7,7 @@ import asyncio
 import logging
 import psutil
 import time
+import os
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 from collections import defaultdict
@@ -25,7 +26,7 @@ from app.models.model import Model, ModelDeployment
 from app.schemas.monitoring import (
     PredictionLog, ModelPerformanceMetrics, SystemHealthMetric, SystemHealthStatus,
     Alert, AuditLog, ModelUsageAnalytics, DashboardMetrics, MetricType, AlertSeverity,
-    SystemComponent
+    SystemComponent, SystemStatus
 )
 from app.config import get_settings
 
@@ -99,19 +100,28 @@ class MonitoringService:
         try:
             async with get_session() as session:
                 # Build query filter
-                query_filter = and_(
+                # query_filter = and_(
+                #     PredictionLogDB.model_id == model_id,
+                #     PredictionLogDB.timestamp >= start_time,
+                #     PredictionLogDB.timestamp <= end_time
+                # )
+                # if deployment_id:
+                #     query_filter = and_(query_filter, PredictionLogDB.deployment_id == deployment_id)
+                
+                # Use sqlmodel.select for clarity and directness
+                stmt = select(PredictionLogDB).where(
                     PredictionLogDB.model_id == model_id,
                     PredictionLogDB.timestamp >= start_time,
                     PredictionLogDB.timestamp <= end_time
                 )
-                
                 if deployment_id:
-                    query_filter = and_(query_filter, PredictionLogDB.deployment_id == deployment_id)
+                    stmt = stmt.where(PredictionLogDB.deployment_id == deployment_id)
                 
                 # Get all prediction logs for the time window
-                result = await session.execute(
-                    session.query(PredictionLogDB).filter(query_filter).all()
-                )
+                # result = await session.execute(
+                #     session.query(PredictionLogDB).filter(query_filter).all() # Incorrect usage
+                # )
+                result = await session.execute(stmt) # Corrected query execution
                 logs = result.scalars().all()
                 
                 if not logs:
@@ -216,42 +226,132 @@ class MonitoringService:
         """Collect current system health metrics"""
         try:
             metrics = []
-            
+            node_name = "unknown"
+            if hasattr(psutil, 'uname'):
+                node_name = await asyncio.to_thread(getattr, psutil.uname(), 'node')
+
             # CPU usage
-            cpu_percent = psutil.cpu_percent(interval=1)
+            cpu_percent = await asyncio.to_thread(psutil.cpu_percent, interval=1)
+            cpu_status = SystemStatus.OPERATIONAL
+            if cpu_percent > self.alert_thresholds.get("cpu_usage_critical", 90.0): # Example critical threshold
+                cpu_status = SystemStatus.UNHEALTHY
+            elif cpu_percent > self.alert_thresholds.get("cpu_usage_warning", 75.0): # Example warning threshold
+                cpu_status = SystemStatus.DEGRADED
             metrics.append(SystemHealthMetric(
                 component=SystemComponent.API_SERVER,
+                status=cpu_status,
+                message=f"CPU at {cpu_percent}%",
                 metric_type=MetricType.CPU_USAGE,
                 value=cpu_percent,
                 unit="percent",
-                host=psutil.uname().node if hasattr(psutil, 'uname') else "unknown"
+                host=node_name
             ))
             
             # Memory usage
-            memory = psutil.virtual_memory()
+            memory = await asyncio.to_thread(psutil.virtual_memory)
+            memory_percent = memory.percent
+            memory_status = SystemStatus.OPERATIONAL
+            if memory_percent > self.alert_thresholds.get("memory_usage_critical", 90.0):
+                memory_status = SystemStatus.UNHEALTHY
+            elif memory_percent > self.alert_thresholds.get("memory_usage_warning", 80.0):
+                memory_status = SystemStatus.DEGRADED
             metrics.append(SystemHealthMetric(
                 component=SystemComponent.API_SERVER,
+                status=memory_status,
+                message=f"Memory at {memory_percent}%",
                 metric_type=MetricType.MEMORY_USAGE,
-                value=memory.percent,
+                value=memory_percent,
                 unit="percent",
-                host=psutil.uname().node if hasattr(psutil, 'uname') else "unknown"
+                host=node_name
             ))
             
-            # Disk usage
-            disk = psutil.disk_usage('/')
+            # Disk usage for root directory
+            disk_root = await asyncio.to_thread(psutil.disk_usage, '/')
+            disk_root_percent = disk_root.percent
+            disk_root_status = SystemStatus.OPERATIONAL
+            if disk_root_percent > self.alert_thresholds.get("disk_usage_critical", 90.0):
+                disk_root_status = SystemStatus.UNHEALTHY
+            elif disk_root_percent > self.alert_thresholds.get("disk_usage_warning", 80.0):
+                disk_root_status = SystemStatus.DEGRADED
             metrics.append(SystemHealthMetric(
                 component=SystemComponent.STORAGE,
+                status=disk_root_status,
+                message=f"Root disk usage at {disk_root_percent}% on {node_name}",
                 metric_type=MetricType.DISK_USAGE,
-                value=disk.percent,
+                mount_point='/',
+                value=disk_root_percent,
                 unit="percent",
-                host=psutil.uname().node if hasattr(psutil, 'uname') else "unknown"
+                host=node_name
+            ))
+
+            # Disk usage for models directory
+            try:
+                models_dir_path = settings.MODELS_DIR
+                abs_models_dir_path = os.path.abspath(models_dir_path)
+                if os.path.exists(abs_models_dir_path):
+                    disk_models = await asyncio.to_thread(psutil.disk_usage, abs_models_dir_path)
+                    disk_models_percent = disk_models.percent
+                    disk_models_status = SystemStatus.OPERATIONAL
+                    if disk_models_percent > self.alert_thresholds.get("disk_usage_models_critical", 90.0):
+                        disk_models_status = SystemStatus.UNHEALTHY
+                    elif disk_models_percent > self.alert_thresholds.get("disk_usage_models_warning", 80.0):
+                        disk_models_status = SystemStatus.DEGRADED
+                    metrics.append(SystemHealthMetric(
+                        component=SystemComponent.STORAGE,
+                        status=disk_models_status,
+                        message=f"Models disk usage at {disk_models_percent}% on {node_name}",
+                        metric_type=MetricType.DISK_USAGE_MODELS, # Assuming this MetricType exists or is added
+                        mount_point=abs_models_dir_path,
+                        value=disk_models_percent,
+                        unit="percent",
+                        host=node_name
+                    ))
+            except Exception as e:
+                logger.warning(f"Could not get disk usage for models directory {settings.MODELS_DIR}: {e}")
+                metrics.append(SystemHealthMetric(
+                    component=SystemComponent.STORAGE,
+                    status=SystemStatus.DEGRADED, # Or UNHEALTHY if critical
+                    message=f"Could not get disk usage for models directory: {e}",
+                    metric_type=MetricType.DISK_USAGE_MODELS,
+                    host=node_name
+                ))
+            
+            # Database health
+            db_healthy, db_message = await self._check_database_health() # Assuming this method exists and returns (bool, str)
+            db_status = SystemStatus.OPERATIONAL if db_healthy else SystemStatus.UNHEALTHY
+            metrics.append(SystemHealthMetric(
+                component=SystemComponent.DATABASE,
+                status=db_status,
+                message=db_message,
+                metric_type=MetricType.DB_CONNECTION_STATUS, # Assuming this MetricType exists
+                value=1.0 if db_healthy else 0.0,
+                unit="status", # Or None, as value is binary
+                host=settings.POSTGRES_SERVER if not settings.is_sqlite() else "sqlite_db"
+            ))
+
+            # BentoML system health (conceptual)
+            # Assuming check_bentoml_system_health returns (bool, str)
+            bento_healthy, bento_message = await self.check_bentoml_system_health() 
+            bento_status = SystemStatus.OPERATIONAL if bento_healthy else SystemStatus.UNHEALTHY
+            metrics.append(SystemHealthMetric(
+                component=SystemComponent.BENTOML,
+                status=bento_status,
+                message=bento_message,
+                metric_type=MetricType.BENTOML_SERVICE_STATUS,
+                value=1.0 if bento_healthy else 0.0,
+                unit="status" # Or None
             ))
             
+            logger.debug(f"Collected system health metrics: {len(metrics)} metrics")
             return metrics
-            
         except Exception as e:
-            logger.error(f"Error collecting system health metrics: {e}")
-            return []
+            logger.error(f"Error collecting system health metrics: {e}", exc_info=True)
+            # Return a metric indicating error in collection itself
+            return [SystemHealthMetric(
+                component=SystemComponent.SYSTEM, # General system component
+                status=SystemStatus.UNHEALTHY,
+                message=f"Error collecting system health metrics: {e}"
+            )]
     
     async def store_health_metric(self, metric: SystemHealthMetric) -> str:
         """Store system health metric in database"""
@@ -280,50 +380,37 @@ class MonitoringService:
         """Get overall system health status"""
         try:
             # Collect current metrics
-            current_metrics = await self.collect_system_health_metrics()
+            component_metrics = await self.collect_system_health_metrics()
             
-            # Store metrics
-            for metric in current_metrics:
-                await self.store_health_metric(metric)
+            # Store metrics if needed by design (currently get_system_health_status is called by health_check_loop which might store)
+            # for metric in component_metrics:
+            #     await self.store_health_metric(metric) # This might be redundant if called in a loop elsewhere
             
-            # Determine overall status
-            cpu_usage = next((m.value for m in current_metrics if m.metric_type == MetricType.CPU_USAGE), 0)
-            memory_usage = next((m.value for m in current_metrics if m.metric_type == MetricType.MEMORY_USAGE), 0)
-            
-            overall_status = "healthy"
-            if cpu_usage > 90 or memory_usage > 90:
-                overall_status = "critical"
-            elif cpu_usage > 80 or memory_usage > 80:
-                overall_status = "warning"
-            
-            # Build component status
-            components = {
-                "api_server": {
-                    "status": "healthy" if cpu_usage < 80 else "warning",
-                    "cpu": cpu_usage,
-                    "memory": memory_usage
-                },
-                "database": {
-                    "status": "healthy",  # Would check database connection
-                    "connections": 0,  # Would query actual connection count
-                    "response_time": 0.0
-                },
-                "model_services": {
-                    "status": "healthy",
-                    "active_models": 0,  # Would query actual count
-                    "avg_latency": 0.0
-                }
-            }
+            # Determine overall status based on components
+            overall_status = SystemStatus.OPERATIONAL
+            if any(m.status == SystemStatus.UNHEALTHY for m in component_metrics):
+                overall_status = SystemStatus.UNHEALTHY
+            elif any(m.status == SystemStatus.DEGRADED for m in component_metrics):
+                overall_status = SystemStatus.DEGRADED
             
             return SystemHealthStatus(
                 overall_status=overall_status,
-                components=components,
-                uptime_seconds=time.time() - self.start_time
+                components=component_metrics
+                # last_check is defaulted by Pydantic model
+                # uptime_seconds was removed from schema
             )
             
         except Exception as e:
-            logger.error(f"Error getting system health status: {e}")
-            raise
+            logger.error(f"Error getting system health status: {e}", exc_info=True)
+            # Return an unhealthy status if there's an error getting the status
+            return SystemHealthStatus(
+                overall_status=SystemStatus.UNHEALTHY,
+                components=[SystemHealthMetric(
+                    component=SystemComponent.SYSTEM,
+                    status=SystemStatus.UNHEALTHY,
+                    message=f"Failed to determine system health: {e}"
+                )]
+            )
     
     # Alert Management
     
@@ -604,108 +691,228 @@ class MonitoringService:
                 await asyncio.sleep(60)
 
     async def check_system_health(self) -> Dict[str, Any]:
-        """Check current system health and return basic metrics"""
+        """Check basic system health"""
         try:
-            # Get current system metrics
-            cpu_usage = psutil.cpu_percent(interval=1)
-            memory = psutil.virtual_memory()
-            disk = psutil.disk_usage('/')
+            cpu_percent = psutil.cpu_percent()
+            memory_info = psutil.virtual_memory()
+            disk_info = psutil.disk_usage('/')
             
             return {
-                "cpu_usage": cpu_usage,
-                "memory_usage": memory.percent,
-                "disk_usage": disk.percent,
+                "status": "healthy" if cpu_percent < 80 and memory_info.percent < 85 else "unhealthy",
+                "cpu_usage": cpu_percent,
+                "memory_usage": memory_info.percent,
+                "disk_usage": disk_info.percent,
                 "timestamp": datetime.utcnow().isoformat()
             }
         except Exception as e:
             logger.error(f"Error checking system health: {e}")
             return {
-                "cpu_usage": 0.0,
-                "memory_usage": 0.0,
-                "disk_usage": 0.0,
+                "status": "error",
                 "error": str(e),
                 "timestamp": datetime.utcnow().isoformat()
             }
-
-    async def calculate_metrics(self, session, model_id: str) -> Dict[str, Any]:
-        """Calculate metrics for a model (for test compatibility)"""
+    
+    async def get_system_health(self) -> Dict[str, Any]:
+        """Get system health status (alias for check_system_health)"""
+        return await self.check_system_health()
+    
+    async def get_prediction_logs(self, model_id: Optional[str] = None, limit: int = 100) -> List[Dict[str, Any]]:
+        """Get prediction logs"""
         try:
-            # Get recent prediction logs for the model
-            stmt = select(PredictionLogDB).where(PredictionLogDB.model_id == model_id)
-            result = session.execute(stmt)
-            logs = result.scalars().all()
+            async with get_session() as session:
+                query = select(PredictionLogDB)
+                if model_id:
+                    query = query.where(PredictionLogDB.model_id == model_id)
+                query = query.order_by(desc(PredictionLogDB.timestamp)).limit(limit)
+                
+                result = await session.execute(query)
+                logs = result.scalars().all()
+                
+                return [
+                    {
+                        "id": log.id,
+                        "model_id": log.model_id,
+                        "deployment_id": log.deployment_id,
+                        "timestamp": log.timestamp.isoformat(),
+                        "latency_ms": log.latency_ms,
+                        "success": log.success,
+                        "error_message": log.error_message
+                    }
+                    for log in logs
+                ]
+        except Exception as e:
+            logger.error(f"Error getting prediction logs: {e}")
+            return []
+    
+    async def get_alerts(self, severity: Optional[str] = None, resolved: Optional[bool] = None) -> List[Dict[str, Any]]:
+        """Get alerts"""
+        try:
+            async with get_session() as session:
+                query = select(AlertDB)
+                if severity:
+                    query = query.where(AlertDB.severity == severity)
+                if resolved is not None:
+                    query = query.where(AlertDB.resolved == resolved)
+                query = query.order_by(desc(AlertDB.created_at))
+                
+                result = await session.execute(query)
+                alerts = result.scalars().all()
+                
+                return [
+                    {
+                        "id": alert.id,
+                        "severity": alert.severity,
+                        "component": alert.component,
+                        "title": alert.title,
+                        "description": alert.description,
+                        "resolved": alert.resolved,
+                        "created_at": alert.created_at.isoformat()
+                    }
+                    for alert in alerts
+                ]
+        except Exception as e:
+            logger.error(f"Error getting alerts: {e}")
+            return []
+    
+    async def resolve_alert(self, alert_id: str) -> bool:
+        """Resolve an alert"""
+        try:
+            async with get_session() as session:
+                result = await session.execute(
+                    select(AlertDB).where(AlertDB.id == alert_id)
+                )
+                alert = result.scalar_one_or_none()
+                
+                if alert:
+                    alert.resolved = True
+                    alert.resolved_at = datetime.utcnow()
+                    await session.commit()
+                    return True
+                return False
+        except Exception as e:
+            logger.error(f"Error resolving alert: {e}")
+            return False
+    
+    async def get_aggregated_metrics(self, model_id: Optional[str] = None, time_range: str = "24h") -> Dict[str, Any]:
+        """Get aggregated metrics"""
+        try:
+            # Parse time range
+            if time_range == "1h":
+                start_time = datetime.utcnow() - timedelta(hours=1)
+            elif time_range == "24h":
+                start_time = datetime.utcnow() - timedelta(hours=24)
+            elif time_range == "7d":
+                start_time = datetime.utcnow() - timedelta(days=7)
+            else:
+                start_time = datetime.utcnow() - timedelta(hours=24)
             
-            if not logs:
+            end_time = datetime.utcnow()
+            
+            if model_id:
+                metrics = await self.get_model_performance_metrics(model_id, start_time, end_time)
                 return {
-                    "total_predictions": 0,
-                    "success_rate": 0.0,
-                    "average_response_time": 0.0
+                    "model_id": model_id,
+                    "total_requests": metrics.total_requests,
+                    "avg_latency_ms": metrics.avg_latency_ms,
+                    "success_rate": metrics.success_rate,
+                    "error_rate": metrics.error_rate
                 }
-            
-            total_predictions = len(logs)
-            successful_predictions = sum(1 for log in logs if log.success)
-            success_rate = successful_predictions / total_predictions if total_predictions > 0 else 0.0
-            
-            response_times = [log.latency_ms for log in logs]
-            average_response_time = sum(response_times) / len(response_times) if response_times else 0.0
-            
-            return {
-                "total_predictions": total_predictions,
-                "success_rate": success_rate,
-                "average_response_time": average_response_time
-            }
+            else:
+                # System-wide metrics
+                system_health = await self.get_system_health()
+                return {
+                    "system_health": system_health,
+                    "time_range": time_range
+                }
         except Exception as e:
-            logger.error(f"Error calculating metrics: {e}")
-            raise
-
-    async def log_prediction(self, session, model_id: str, input_data: Dict[str, Any], 
-                           prediction: Dict[str, Any], response_time: float, status: str) -> None:
-        """Log a prediction (for test compatibility)"""
+            logger.error(f"Error getting aggregated metrics: {e}")
+            return {}
+    
+    async def get_deployment_summary(self, deployment_id: str) -> Dict[str, Any]:
+        """Get deployment summary"""
         try:
-            log_entry = PredictionLogDB(
-                id=str(uuid.uuid4()),
-                model_id=model_id,
-                deployment_id=None,
-                request_id=str(uuid.uuid4()),
-                input_data=input_data,
-                output_data=prediction,
-                latency_ms=response_time,
-                timestamp=datetime.utcnow(),
-                api_endpoint="/predict",
-                success=(status == "success"),
-                error_message=None if status == "success" else status
-            )
-            
-            session.add(log_entry)
-            session.commit()
-            logger.info(f"Logged prediction for model {model_id}")
-            
+            async with get_session() as session:
+                # Get deployment info
+                result = await session.execute(
+                    select(ModelDeployment).where(ModelDeployment.id == deployment_id)
+                )
+                deployment = result.scalar_one_or_none()
+                
+                if not deployment:
+                    return {"error": "Deployment not found"}
+                
+                # Get recent metrics
+                start_time = datetime.utcnow() - timedelta(hours=24)
+                end_time = datetime.utcnow()
+                
+                metrics = await self.get_model_performance_metrics(
+                    deployment.model_id, start_time, end_time, deployment_id
+                )
+                
+                return {
+                    "deployment_id": deployment_id,
+                    "model_id": deployment.model_id,
+                    "status": deployment.status,
+                    "total_requests": metrics.total_requests,
+                    "avg_latency_ms": metrics.avg_latency_ms,
+                    "success_rate": metrics.success_rate,
+                    "last_24h_metrics": {
+                        "requests": metrics.total_requests,
+                        "errors": metrics.failed_requests
+                    }
+                }
         except Exception as e:
-            logger.error(f"Error logging prediction: {e}")
-            raise
+            logger.error(f"Error getting deployment summary: {e}")
+            return {"error": str(e)}
+    
+    # Helper methods for tests
+    async def _save_prediction_log(self, session, **kwargs):
+        """Helper method to save prediction log"""
+        return await self.log_prediction(**kwargs)
+    
+    async def _query_prediction_logs(self, session, **kwargs):
+        """Helper method to query prediction logs"""
+        return await self.get_prediction_logs(**kwargs)
+    
+    async def _save_alert(self, session, **kwargs):
+        """Helper method to save alert"""
+        return await self.create_alert(**kwargs)
+    
+    async def _update_alert_status(self, session, alert_id: str, status: str):
+        """Helper method to update alert status"""
+        if status == "resolved":
+            return await self.resolve_alert(alert_id)
+        return False
 
-    async def create_alert(self, session, alert_type: str, severity: str, title: str, 
-                         message: str, source_component: str, metadata: Dict[str, Any] = None) -> None:
-        """Create an alert (for test compatibility)"""
+    async def _check_database_health(self) -> Tuple[bool, str]:
+        """Check the health of the database connection."""
         try:
-            alert = AlertDB(
-                id=str(uuid.uuid4()),
-                severity=severity,
-                component=source_component,
-                title=title,
-                description=message,
-                triggered_at=datetime.utcnow(),
-                additional_data=metadata or {}
-            )
-            
-            session.add(alert)
-            session.commit()
-            logger.info(f"Created {severity} alert: {title}")
-            
+            async with get_session() as session:
+                # Perform a simple query to check connectivity.
+                # Using func.now() or a similar lightweight query.
+                await session.execute(select(func.now())) 
+            return True, "Database connection successful."
         except Exception as e:
-            logger.error(f"Error creating alert: {e}")
-            raise
+            logger.error(f"Database health check failed: {e}")
+            return False, f"Database connection failed: {str(e)}"
+
+    async def check_bentoml_system_health(self) -> Tuple[bool, str]:
+        """Placeholder for checking BentoML system health.
+        In a real scenario, this might involve querying BentoML's health endpoint
+        or checking the status of running BentoML services.
+        """
+        # This is a placeholder. A real implementation would check:
+        # 1. BentoML server's own health endpoint (if available)
+        # 2. Status of crucial BentoML services or runners
+        # For now, we'll simulate a healthy status.
+        logger.info("Simulating BentoML system health check (placeholder).")
+        return True, "BentoML services appear to be operational (simulated)."
 
 
 # Global monitoring service instance
-monitoring_service = MonitoringService() 
+monitoring_service = MonitoringService()
+
+# Module-level functions for backward compatibility
+async def log_prediction(*args, **kwargs):
+    """Module-level function for logging predictions"""
+    return await monitoring_service.log_prediction(*args, **kwargs) 

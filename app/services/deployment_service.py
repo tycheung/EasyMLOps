@@ -43,7 +43,7 @@ class DeploymentService:
                     return False, f"Model must be validated before deployment", None
                 
                 # Check for existing active deployment
-                existing_deployment = await session.exec(
+                existing_deployment = await session.execute(
                     select(ModelDeployment).where(
                         ModelDeployment.model_id == deployment_data.model_id,
                         ModelDeployment.status == DeploymentStatus.ACTIVE
@@ -76,13 +76,12 @@ class DeploymentService:
                 deployment = ModelDeployment(
                     id=str(uuid.uuid4()),
                     model_id=deployment_data.model_id,
+                    deployment_name=deployment_data.name,
                     name=deployment_data.name,
-                    description=deployment_data.description,
-                    config=deployment_data.config or {},
-                    status=DeploymentStatus.ACTIVE,
-                    endpoint_url=deploy_info.get('endpoint_url'),
-                    service_name=service_info['service_name'],
-                    bento_model_tag=service_info.get('bento_model_tag'),
+                    configuration=deployment_data.config or {},
+                    status=DeploymentStatus.ACTIVE.value,
+                    deployment_url=deploy_info.get('endpoint_url'),
+                    bento_tag=service_info.get('bento_model_tag'),
                     framework=service_info.get('framework'),
                     endpoints=service_info.get('endpoints', []),
                     created_at=datetime.utcnow(),
@@ -103,14 +102,14 @@ class DeploymentService:
                 return True, "Deployment created successfully", ModelDeploymentResponse(
                     id=deployment.id,
                     model_id=deployment.model_id,
-                    name=deployment.name,
-                    description=deployment.description,
-                    status=deployment.status,
-                    endpoint_url=deployment.endpoint_url,
-                    service_name=deployment.service_name,
+                    name=deployment.name or deployment.deployment_name,
+                    description=None,
+                    status=DeploymentStatus(deployment.status),
+                    endpoint_url=deployment.deployment_url,
+                    service_name=deployment.deployment_name,
                     framework=deployment.framework,
                     endpoints=deployment.endpoints,
-                    config=deployment.config,
+                    config=deployment.configuration,
                     created_at=deployment.created_at,
                     updated_at=deployment.updated_at
                 )
@@ -130,14 +129,14 @@ class DeploymentService:
                 return ModelDeploymentResponse(
                     id=deployment.id,
                     model_id=deployment.model_id,
-                    name=deployment.name,
-                    description=deployment.description,
-                    status=deployment.status,
-                    endpoint_url=deployment.endpoint_url,
-                    service_name=deployment.service_name,
+                    name=deployment.name or deployment.deployment_name,
+                    description=None,
+                    status=DeploymentStatus(deployment.status),
+                    endpoint_url=deployment.deployment_url,
+                    service_name=deployment.deployment_name,
                     framework=deployment.framework,
                     endpoints=deployment.endpoints,
-                    config=deployment.config,
+                    config=deployment.configuration,
                     created_at=deployment.created_at,
                     updated_at=deployment.updated_at
                 )
@@ -164,21 +163,21 @@ class DeploymentService:
                 
                 query = query.offset(offset).limit(limit).order_by(ModelDeployment.created_at.desc())
                 
-                result = await session.exec(query)
+                result = await session.execute(query)
                 deployments = result.all()
                 
                 return [
                     ModelDeploymentResponse(
                         id=deployment.id,
                         model_id=deployment.model_id,
-                        name=deployment.name,
-                        description=deployment.description,
-                        status=deployment.status,
-                        endpoint_url=deployment.endpoint_url,
-                        service_name=deployment.service_name,
+                        name=deployment.name or deployment.deployment_name,
+                        description=None,
+                        status=DeploymentStatus(deployment.status),
+                        endpoint_url=deployment.deployment_url,
+                        service_name=deployment.deployment_name,
                         framework=deployment.framework,
                         endpoints=deployment.endpoints,
-                        config=deployment.config,
+                        config=deployment.configuration,
                         created_at=deployment.created_at,
                         updated_at=deployment.updated_at
                     )
@@ -200,32 +199,28 @@ class DeploymentService:
                 # Update fields if provided
                 if update_data.name is not None:
                     deployment.name = update_data.name
-                
-                if update_data.description is not None:
-                    deployment.description = update_data.description
+                    deployment.deployment_name = update_data.name
                 
                 if update_data.config is not None:
-                    deployment.config = update_data.config
+                    deployment.configuration = update_data.config
                 
                 if update_data.status is not None:
                     old_status = deployment.status
-                    deployment.status = update_data.status
+                    deployment.status = update_data.status.value
                     
                     # Handle status change actions
-                    if old_status != update_data.status:
+                    if old_status != update_data.status.value:
                         if update_data.status == DeploymentStatus.STOPPED:
-                            # Undeploy the service
-                            await bentoml_service_manager.undeploy_service(deployment.service_name)
-                        elif update_data.status == DeploymentStatus.ACTIVE and old_status == DeploymentStatus.STOPPED:
-                            # Redeploy the service
+                            await bentoml_service_manager.undeploy_service(deployment.deployment_name)
+                        elif update_data.status == DeploymentStatus.ACTIVE and old_status == DeploymentStatus.STOPPED.value:
                             success, message, deploy_info = await bentoml_service_manager.deploy_service(
-                                deployment.service_name,
-                                deployment.config
+                                deployment.deployment_name,
+                                deployment.configuration
                             )
                             if not success:
                                 return False, f"Failed to redeploy service: {message}", None
                             
-                            deployment.endpoint_url = deploy_info.get('endpoint_url')
+                            deployment.deployment_url = deploy_info.get('endpoint_url')
                 
                 deployment.updated_at = datetime.utcnow()
                 await session.commit()
@@ -236,14 +231,14 @@ class DeploymentService:
                 return True, "Deployment updated successfully", ModelDeploymentResponse(
                     id=deployment.id,
                     model_id=deployment.model_id,
-                    name=deployment.name,
-                    description=deployment.description,
-                    status=deployment.status,
-                    endpoint_url=deployment.endpoint_url,
-                    service_name=deployment.service_name,
+                    name=deployment.name or deployment.deployment_name,
+                    description=None,
+                    status=DeploymentStatus(deployment.status),
+                    endpoint_url=deployment.deployment_url,
+                    service_name=deployment.deployment_name,
                     framework=deployment.framework,
                     endpoints=deployment.endpoints,
-                    config=deployment.config,
+                    config=deployment.configuration,
                     created_at=deployment.created_at,
                     updated_at=deployment.updated_at
                 )
@@ -261,14 +256,14 @@ class DeploymentService:
                     return False, f"Deployment {deployment_id} not found"
                 
                 # Undeploy the service
-                if deployment.status == DeploymentStatus.ACTIVE:
-                    await bentoml_service_manager.undeploy_service(deployment.service_name)
+                if deployment.status == DeploymentStatus.ACTIVE.value:
+                    await bentoml_service_manager.undeploy_service(deployment.deployment_name)
                 
                 # Update model status if this was the only deployment
                 model = await session.get(Model, deployment.model_id)
                 if model:
                     # Check for other active deployments
-                    other_deployments = await session.exec(
+                    other_deployments = await session.execute(
                         select(ModelDeployment).where(
                             ModelDeployment.model_id == deployment.model_id,
                             ModelDeployment.id != deployment_id,
@@ -281,7 +276,7 @@ class DeploymentService:
                         model.updated_at = datetime.utcnow()
                 
                 # Delete deployment record
-                await session.delete(deployment)
+                session.delete(deployment)
                 await session.commit()
                 
                 logger.info(f"Successfully deleted deployment {deployment_id}")
@@ -300,14 +295,14 @@ class DeploymentService:
                     return None
                 
                 # Get service status from BentoML
-                service_status = await bentoml_service_manager.get_service_status(deployment.service_name)
+                service_status = await bentoml_service_manager.get_service_status(deployment.deployment_name)
                 
                 return {
                     'deployment_id': deployment.id,
                     'deployment_status': deployment.status,
                     'service_status': service_status,
-                    'endpoint_url': deployment.endpoint_url,
-                    'service_name': deployment.service_name,
+                    'endpoint_url': deployment.deployment_url,
+                    'service_name': deployment.deployment_name,
                     'framework': deployment.framework,
                     'endpoints': deployment.endpoints,
                     'last_check': datetime.utcnow()
@@ -332,7 +327,7 @@ class DeploymentService:
                 # For now, return a mock response
                 mock_response = {
                     'deployment_id': deployment_id,
-                    'predictions': [0.75, 0.25],  # Mock prediction
+                    'predictions': [0.75, 0.25],
                     'model_id': deployment.model_id,
                     'framework': deployment.framework,
                     'test_successful': True,
@@ -371,106 +366,94 @@ class DeploymentService:
         except Exception as e:
             logger.error(f"Error getting deployment metrics {deployment_id}: {e}")
             return None
-
-    async def create_deployment(self, session, deployment_config: Dict[str, Any]) -> Any:
-        """Create a deployment (for test compatibility)"""
+    
+    async def start_deployment(self, deployment_id: str) -> Tuple[bool, str]:
+        """Start a stopped deployment"""
         try:
-            # Mock deployment for testing
-            class MockDeployment:
-                def __init__(self, config):
-                    self.name = config.get("name", "test_deployment")
-                    self.model_id = config.get("model_id")
-                    self.status = "pending"
-                    self.id = str(uuid.uuid4())
-                    
-            return MockDeployment(deployment_config)
+            update_data = ModelDeploymentUpdate(status=DeploymentStatus.ACTIVE)
+            success, message, deployment = await self.update_deployment(deployment_id, update_data)
+            return success, message
         except Exception as e:
-            logger.error(f"Error creating deployment: {e}")
-            raise
+            logger.error(f"Error starting deployment {deployment_id}: {e}")
+            return False, str(e)
 
-    async def deploy_model(self, deployment) -> bool:
-        """Deploy a model (for test compatibility)"""
+    async def stop_deployment(self, deployment_id: str) -> Tuple[bool, str]:
+        """Stop an active deployment"""
         try:
-            # Mock deployment
-            deployment.status = "running"
-            deployment.deployment_url = "http://localhost:3001"
-            return True
+            update_data = ModelDeploymentUpdate(status=DeploymentStatus.STOPPED)
+            success, message, deployment = await self.update_deployment(deployment_id, update_data)
+            return success, message
         except Exception as e:
-            logger.error(f"Error deploying model: {e}")
+            logger.error(f"Error stopping deployment {deployment_id}: {e}")
+            return False, str(e)
+
+    async def scale_deployment(self, deployment_id: str, scale_config: Dict[str, Any]) -> Tuple[bool, str]:
+        """Scale a deployment"""
+        try:
+            update_data = ModelDeploymentUpdate(config=scale_config)
+            success, message, deployment = await self.update_deployment(deployment_id, update_data)
+            return success, message
+        except Exception as e:
+            logger.error(f"Error scaling deployment {deployment_id}: {e}")
+            return False, str(e)
+
+    async def deploy_model(self, deployment_data: ModelDeploymentCreate) -> Tuple[bool, str, Optional[ModelDeploymentResponse]]:
+        """Deploy a model (alias for create_deployment for backward compatibility)"""
+        return await self.create_deployment(deployment_data)
+
+    async def _stop_bento_server(self, deployment_name: str) -> bool:
+        """Stop a BentoML server"""
+        try:
+            return await bentoml_service_manager.undeploy_service(deployment_name)
+        except Exception as e:
+            logger.error(f"Error stopping BentoML server {deployment_name}: {e}")
             return False
 
-    async def stop_deployment(self, deployment) -> bool:
-        """Stop a deployment (for test compatibility)"""
+    async def _update_scaling(self, deployment_id: str, replicas: int) -> bool:
+        """Update scaling configuration for a deployment"""
         try:
-            deployment.status = "stopped"
-            return True
+            async with get_session() as session:
+                deployment = await session.get(ModelDeployment, deployment_id)
+                if not deployment:
+                    return False
+                
+                deployment.replicas = replicas
+                deployment.updated_at = datetime.utcnow()
+                await session.commit()
+                
+                # In a real implementation, this would update the actual service scaling
+                logger.info(f"Updated scaling for deployment {deployment_id} to {replicas} replicas")
+                return True
+                
         except Exception as e:
-            logger.error(f"Error stopping deployment: {e}")
+            logger.error(f"Error updating scaling for deployment {deployment_id}: {e}")
             return False
 
-    async def scale_deployment(self, deployment, new_scaling: Dict[str, Any]) -> bool:
-        """Scale a deployment (for test compatibility)"""
+    async def update_deployment_config(self, deployment_id: str, config: Dict[str, Any]) -> Tuple[bool, str, Optional[ModelDeploymentResponse]]:
+        """Update deployment configuration"""
         try:
-            # Mock scaling - just return True since the actual ModelDeployment
-            # doesn't have a scaling field
-            return True
+            update_data = ModelDeploymentUpdate(config=config)
+            return await self.update_deployment(deployment_id, update_data)
         except Exception as e:
-            logger.error(f"Error scaling deployment: {e}")
-            return False
+            logger.error(f"Error updating deployment config {deployment_id}: {e}")
+            return False, str(e), None
 
-    async def get_deployment_status(self, deployment) -> Dict[str, Any]:
-        """Get deployment status (for test compatibility)"""
+    async def get_deployment_logs(self, deployment: ModelDeployment, lines: int = 100) -> List[str]:
+        """Get deployment logs"""
         try:
-            return {
-                "status": "healthy",
-                "endpoint_accessible": True,
-                "last_check": datetime.utcnow().isoformat()
-            }
-        except Exception as e:
-            logger.error(f"Error getting deployment status: {e}")
-            return {
-                "status": "error",
-                "endpoint_accessible": False,
-                "error": str(e)
-            }
-
-    async def update_deployment_config(self, deployment, new_config: Dict[str, Any]) -> bool:
-        """Update deployment configuration (for test compatibility)"""
-        try:
-            # Mock config update - just return True since the actual ModelDeployment
-            # has different fields than what the test expects
-            return True
-        except Exception as e:
-            logger.error(f"Error updating deployment config: {e}")
-            return False
-
-    async def get_deployment_logs(self, deployment) -> List[str]:
-        """Get deployment logs (for test compatibility)"""
-        try:
-            return [
-                "Starting deployment...",
-                "Loading model...",
-                "Service ready"
+            # In a real implementation, this would fetch actual logs from the service
+            # For now, return mock logs
+            mock_logs = [
+                f"[{datetime.utcnow().isoformat()}] INFO: Service {deployment.deployment_name} started",
+                f"[{datetime.utcnow().isoformat()}] INFO: Model loaded successfully",
+                f"[{datetime.utcnow().isoformat()}] INFO: Endpoint /predict ready",
+                f"[{datetime.utcnow().isoformat()}] INFO: Health check passed"
             ]
+            return mock_logs[-lines:] if lines > 0 else mock_logs
+            
         except Exception as e:
             logger.error(f"Error getting deployment logs: {e}")
-            return [f"Error: {str(e)}"]
-
-    async def _start_bento_server(self, deployment) -> str:
-        """Mock method for starting BentoML server"""
-        return "http://localhost:3001"
-
-    async def _stop_bento_server(self, deployment) -> bool:
-        """Mock method for stopping BentoML server"""
-        return True
-
-    async def _update_scaling(self, deployment, scaling_config: Dict[str, Any]) -> bool:
-        """Mock method for updating scaling"""
-        return True
-
-    async def _fetch_container_logs(self, deployment) -> List[str]:
-        """Mock method for fetching container logs"""
-        return ["Log line 1", "Log line 2", "Log line 3"]
+            return [f"Error retrieving logs: {str(e)}"]
 
 
 # Global deployment service instance

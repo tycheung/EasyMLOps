@@ -9,13 +9,14 @@ from unittest.mock import patch, MagicMock, AsyncMock
 from fastapi import status
 from fastapi.testclient import TestClient
 
-from app.main import app
+# Import the get_test_app function instead of the non-existent app
+from tests.conftest import get_test_app
 
 
 @pytest.fixture
 def schema_client():
     """Create test client for schema routes"""
-    return TestClient(app)
+    return TestClient(get_test_app())
 
 
 @pytest.fixture
@@ -291,7 +292,7 @@ class TestSchemaGeneration:
         
         assert response.status_code == 400
         result = response.json()
-        assert "empty" in result["detail"].lower()
+        assert "empty" in result["error"]["message"].lower()
     
     @patch('app.services.schema_service.schema_service.generate_schema_from_data')
     def test_generate_schema_service_error(self, mock_generate, schema_client, sample_training_data):
@@ -369,7 +370,7 @@ class TestSchemaConversion:
         
         assert response.status_code == 400
         result = response.json()
-        assert "unsupported" in result["detail"].lower()
+        assert "unsupported" in result["error"]["message"].lower()
     
     @patch('app.services.schema_service.schema_service.convert_to_openapi_schema')
     def test_convert_schema_service_error(self, mock_convert, schema_client, sample_input_schema):
@@ -498,27 +499,32 @@ class TestSchemaComparison:
 class TestModelSchemaManagement:
     """Test model schema management endpoints"""
     
-    @patch('app.database.get_session')
-    def test_get_model_schemas_success(self, mock_get_session, schema_client, test_model):
+    @patch('app.services.schema_service.schema_service.get_model_schemas')
+    def test_get_model_schemas_success(self, mock_get_schemas, schema_client, test_model):
         """Test retrieving model schemas"""
-        mock_session = MagicMock()
-        mock_session.query.return_value.filter.return_value.all.return_value = [
-            {
-                "id": "schema_1",
-                "model_id": test_model.id,
-                "schema_type": "input",
-                "schema_data": {"type": "object", "properties": {"feature1": {"type": "number"}}},
-                "version": "1.0"
-            },
-            {
-                "id": "schema_2", 
-                "model_id": test_model.id,
-                "schema_type": "output",
-                "schema_data": {"type": "object", "properties": {"prediction": {"type": "number"}}},
-                "version": "1.0"
-            }
-        ]
-        mock_get_session.return_value.__aenter__.return_value = mock_session
+        from app.schemas.model import InputSchema, OutputSchema, FieldSchema, DataType
+        
+        # Mock input schema
+        input_schema = InputSchema(fields=[
+            FieldSchema(
+                name="feature1",
+                data_type=DataType.FLOAT,
+                required=True,
+                description="First feature"
+            )
+        ])
+        
+        # Mock output schema
+        output_schema = OutputSchema(fields=[
+            FieldSchema(
+                name="prediction",
+                data_type=DataType.FLOAT,
+                required=True,
+                description="Model prediction"
+            )
+        ])
+        
+        mock_get_schemas.return_value = (input_schema, output_schema)
         
         response = schema_client.get(f"/api/v1/schemas/models/{test_model.id}")
         
@@ -527,13 +533,12 @@ class TestModelSchemaManagement:
         assert "input_schema" in result
         assert "output_schema" in result
         assert result["model_id"] == test_model.id
+        mock_get_schemas.assert_called_once_with(test_model.id)
     
-    @patch('app.database.get_session')
-    def test_get_model_schemas_not_found(self, mock_get_session, schema_client):
+    @patch('app.services.schema_service.schema_service.get_model_schemas')
+    def test_get_model_schemas_not_found(self, mock_get_schemas, schema_client):
         """Test retrieving schemas for non-existent model"""
-        mock_session = MagicMock()
-        mock_session.query.return_value.filter.return_value.all.return_value = []
-        mock_get_session.return_value.__aenter__.return_value = mock_session
+        mock_get_schemas.return_value = (None, None)
         
         response = schema_client.get("/api/v1/schemas/models/nonexistent")
         
@@ -695,10 +700,10 @@ class TestSchemaErrorHandling:
         
         assert response.status_code == 422
     
-    @patch('app.database.get_session')
-    def test_database_error_handling(self, mock_get_session, schema_client):
+    @patch('app.services.schema_service.schema_service.get_model_schemas')
+    def test_database_error_handling(self, mock_get_schemas, schema_client):
         """Test handling database errors"""
-        mock_get_session.side_effect = Exception("Database connection failed")
+        mock_get_schemas.side_effect = Exception("Database connection failed")
         
         response = schema_client.get("/api/v1/schemas/models/test_model")
         

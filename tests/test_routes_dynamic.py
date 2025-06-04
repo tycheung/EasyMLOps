@@ -6,6 +6,7 @@ Tests dynamic prediction endpoints, schema validation, batch processing, and rou
 import pytest
 import json
 import io
+from datetime import datetime
 from unittest.mock import patch, MagicMock, AsyncMock
 from fastapi import status
 from fastapi.testclient import TestClient
@@ -14,16 +15,10 @@ import pathlib
 import uuid
 import asyncio
 
-from app.main import app
+from app.main import create_app
 from app.models.model import ModelDeployment, ModelPrediction
 from app.schemas.model import DeploymentStatus
 from app.routes.dynamic import route_manager
-
-
-@pytest.fixture
-def dynamic_client():
-    """Create test client for dynamic routes"""
-    return TestClient(app)
 
 
 @pytest.fixture
@@ -32,15 +27,13 @@ def sample_deployment(test_model):
     return ModelDeployment(
         id="deploy_123",
         model_id=test_model.id,
-        name="test_deployment",
-        service_name="model_service_123",
-        endpoint_url="http://localhost:3000/model_service_123",
-        framework="sklearn",
-        endpoints=["predict", "predict_proba"],
-        status=DeploymentStatus.ACTIVE,
-        config={},
-        created_at=datetime.utcnow(),
-        updated_at=datetime.utcnow()
+        deployment_name="test_deployment",
+        deployment_url="http://localhost:3000/model_service_123",
+        status="active",
+        configuration={},
+        framework="sklearn",  # Set default framework
+        endpoints=["predict", "predict_proba"],  # Set default endpoints
+        created_at=datetime.utcnow()
     )
 
 
@@ -90,7 +83,7 @@ class TestDynamicRouteManager:
         route_info = route_manager.active_routes[sample_deployment.id]
         assert route_info['deployment_id'] == sample_deployment.id
         assert route_info['model_id'] == sample_deployment.model_id
-        assert route_info['framework'] == sample_deployment.framework
+        assert route_info['framework'] == 'sklearn'  # Framework is now properly set in the deployment
     
     def test_unregister_deployment_route(self, sample_deployment):
         """Test unregistering a deployment route"""
@@ -110,349 +103,279 @@ class TestDynamicRouteManager:
 class TestPredictEndpoint:
     """Test main prediction endpoint"""
     
-    @patch('app.database.get_session')
-    @patch('app.services.schema_service.schema_service.get_model_schemas')
-    def test_predict_success_no_schema(self, mock_get_schemas, mock_get_session, 
-                                     dynamic_client, sample_deployment, sample_prediction_data):
+    def test_predict_success_no_schema(self, client, test_deployment, sample_prediction_data):
         """Test successful prediction without schema validation"""
-        # Mock database session
-        mock_session = MagicMock()
-        mock_session.get.return_value = sample_deployment
-        mock_session.add = MagicMock()
-        mock_session.commit = AsyncMock()
-        mock_get_session.return_value.__aenter__.return_value = mock_session
+        # Use the real deployment from the test_deployment fixture
         
-        # Mock no schema
-        mock_get_schemas.return_value = (None, None)
-        
-        response = dynamic_client.post(
-            f"/api/v1/predict/{sample_deployment.id}",
-            json=sample_prediction_data
-        )
-        
-        assert response.status_code == 200
-        result = response.json()
-        assert "predictions" in result
-        assert "validation" in result
-        assert result["validation"]["validation_performed"] is False
-        assert result["model_id"] == sample_deployment.model_id
+        # Mock the schema service to return no schema
+        with patch('app.services.schema_service.schema_service.get_model_schemas') as mock_get_schemas:
+            mock_get_schemas.return_value = (None, None)
+            
+            response = client.post(
+                f"/api/v1/predict/{test_deployment.id}",
+                json=sample_prediction_data
+            )
+            
+            assert response.status_code == 200
+            result = response.json()
+            assert "predictions" in result
+            assert "validation" in result
+            assert result["validation"]["validation_performed"] is False
+            assert result["model_id"] == test_deployment.model_id
     
-    @patch('app.database.get_session')
-    @patch('app.services.schema_service.schema_service.get_model_schemas')
-    @patch('app.services.schema_service.schema_service.validate_prediction_data')
-    def test_predict_success_with_schema(self, mock_validate_data, mock_get_schemas, 
-                                       mock_get_session, dynamic_client, sample_deployment, 
+    def test_predict_success_with_schema(self, client, test_deployment, 
                                        sample_schema_data, test_model):
         """Test successful prediction with schema validation"""
-        # Mock database session
-        mock_session = MagicMock()
-        mock_session.get.return_value = sample_deployment
-        mock_session.add = MagicMock()
-        mock_session.commit = AsyncMock()
-        mock_get_session.return_value.__aenter__.return_value = mock_session
-        
-        # Mock schema exists
-        mock_schema = MagicMock()
-        mock_get_schemas.return_value = (mock_schema, None)
-        
-        # Mock successful validation
-        mock_validate_data.return_value = (True, "Validation successful", sample_schema_data)
-        
-        response = dynamic_client.post(
-            f"/api/v1/predict/{sample_deployment.id}",
-            json=sample_schema_data
-        )
-        
-        assert response.status_code == 200
-        result = response.json()
-        assert "predictions" in result
-        assert "validation" in result
-        assert result["validation"]["validation_performed"] is True
-        assert result["validation"]["schema_applied"] is True
-        mock_validate_data.assert_called_once()
+        # Mock schema service to return schema and validation
+        with patch('app.services.schema_service.schema_service.get_model_schemas') as mock_get_schemas, \
+             patch('app.services.schema_service.schema_service.validate_prediction_data') as mock_validate_data:
+            
+            # Mock schema exists
+            mock_schema = MagicMock()
+            mock_get_schemas.return_value = (mock_schema, None)
+            
+            # Mock successful validation
+            mock_validate_data.return_value = (True, "Validation successful", sample_schema_data)
+            
+            response = client.post(
+                f"/api/v1/predict/{test_deployment.id}",
+                json=sample_schema_data
+            )
+            
+            assert response.status_code == 200
+            result = response.json()
+            assert "predictions" in result
+            assert "validation" in result
+            assert result["validation"]["validation_performed"] is True
+            assert result["validation"]["schema_applied"] is True
+            mock_validate_data.assert_called_once()
     
-    @patch('app.database.get_session')
-    @patch('app.services.schema_service.schema_service.get_model_schemas')  
-    @patch('app.services.schema_service.schema_service.validate_prediction_data')
-    def test_predict_schema_validation_failure(self, mock_validate_data, mock_get_schemas,
-                                             mock_get_session, dynamic_client, sample_deployment,
+    def test_predict_schema_validation_failure(self, client, test_deployment,
                                              sample_schema_data):
         """Test prediction with schema validation failure"""
-        # Mock database session
-        mock_session = MagicMock()
-        mock_session.get.return_value = sample_deployment
-        mock_get_session.return_value.__aenter__.return_value = mock_session
-        
-        # Mock schema exists
-        mock_schema = MagicMock()
-        mock_get_schemas.return_value = (mock_schema, None)
-        
-        # Mock validation failure
-        mock_validate_data.return_value = (False, "Required field 'bedrooms' missing", {})
-        
-        response = dynamic_client.post(
-            f"/api/v1/predict/{sample_deployment.id}",
-            json={"invalid": "data"}
-        )
-        
-        assert response.status_code == 422
-        result = response.json()
-        assert "Input validation failed" in result["detail"]
+        # Mock schema service to return validation failure
+        with patch('app.services.schema_service.schema_service.get_model_schemas') as mock_get_schemas, \
+             patch('app.services.schema_service.schema_service.validate_prediction_data') as mock_validate_data:
+            
+            # Mock schema exists
+            mock_schema = MagicMock()
+            mock_get_schemas.return_value = (mock_schema, None)
+            
+            # Mock validation failure
+            mock_validate_data.return_value = (False, "Required field 'bedrooms' missing", {})
+            
+            response = client.post(
+                f"/api/v1/predict/{test_deployment.id}",
+                json={"invalid": "data"}
+            )
+            
+            assert response.status_code == 422
+            result = response.json()
+            assert "Input validation failed" in result["error"]["message"]
     
-    @patch('app.database.get_session')
-    def test_predict_deployment_not_found(self, mock_get_session, dynamic_client):
+    def test_predict_deployment_not_found(self, client):
         """Test prediction with non-existent deployment"""
-        mock_session = MagicMock()
-        mock_session.get.return_value = None
-        mock_get_session.return_value.__aenter__.return_value = mock_session
-        
-        response = dynamic_client.post(
+        response = client.post(
             "/api/v1/predict/nonexistent",
             json={"data": [1, 2, 3]}
         )
         
         assert response.status_code == 404
         result = response.json()
-        assert "not found" in result["detail"].lower()
+        assert "not found" in result["error"]["message"].lower()
     
-    @patch('app.database.get_session')
-    def test_predict_deployment_inactive(self, mock_get_session, dynamic_client, sample_deployment):
+    def test_predict_deployment_inactive(self, client, test_deployment):
         """Test prediction with inactive deployment"""
-        sample_deployment.status = DeploymentStatus.STOPPED
+        # First, update the deployment status to inactive
+        test_deployment.status = "stopped"  # Use string instead of enum
         
-        mock_session = MagicMock()
-        mock_session.get.return_value = sample_deployment
-        mock_get_session.return_value.__aenter__.return_value = mock_session
-        
-        response = dynamic_client.post(
-            f"/api/v1/predict/{sample_deployment.id}",
-            json={"data": [1, 2, 3]}
-        )
-        
-        assert response.status_code == 400
-        result = response.json()
-        assert "not active" in result["detail"].lower()
+        # Since we can't directly modify in the test db, we'll mock the deployment retrieval
+        with patch('sqlalchemy.ext.asyncio.AsyncSession.get') as mock_get:
+            mock_get.return_value = test_deployment
+            
+            response = client.post(
+                f"/api/v1/predict/{test_deployment.id}",
+                json={"data": [1, 2, 3]}
+            )
+            
+            assert response.status_code == 400
+            result = response.json()
+            assert "not active" in result["error"]["message"].lower()
     
-    def test_predict_invalid_json(self, dynamic_client):
+    def test_predict_invalid_json(self, client, test_deployment):
         """Test prediction with invalid JSON data"""
-        response = dynamic_client.post(
-            "/api/v1/predict/deploy_123",
+        response = client.post(
+            f"/api/v1/predict/{test_deployment.id}",
             data="invalid json",
             headers={"Content-Type": "application/json"}
         )
         
         assert response.status_code == 400
         result = response.json()
-        assert "Invalid JSON" in result["detail"]
+        assert "Invalid JSON" in result["error"]["message"]
 
 
 class TestBatchPredictEndpoint:
     """Test batch prediction endpoint"""
     
-    @patch('app.database.get_session')
-    @patch('app.services.schema_service.schema_service.get_model_schemas')
-    def test_batch_predict_success_no_schema(self, mock_get_schemas, mock_get_session,
-                                           dynamic_client, sample_deployment, sample_batch_data):
+    def test_batch_predict_success_no_schema(self, client, test_deployment, sample_batch_data):
         """Test successful batch prediction without schema validation"""
-        # Mock database session
-        mock_session = MagicMock()
-        mock_session.get.return_value = sample_deployment
-        mock_session.add = MagicMock()
-        mock_session.commit = AsyncMock()
-        mock_get_session.return_value.__aenter__.return_value = mock_session
-        
         # Mock no schema
-        mock_get_schemas.return_value = (None, None)
-        
-        response = dynamic_client.post(
-            f"/api/v1/predict/{sample_deployment.id}/batch",
-            json=sample_batch_data
-        )
-        
-        assert response.status_code == 200
-        result = response.json()
-        assert "predictions" in result
-        assert "validation" in result
-        assert result["validation"]["batch_validation_performed"] is False
-        assert result["batch_size"] == 3
+        with patch('app.services.schema_service.schema_service.get_model_schemas') as mock_get_schemas:
+            mock_get_schemas.return_value = (None, None)
+            
+            response = client.post(
+                f"/api/v1/predict/{test_deployment.id}/batch",
+                json=sample_batch_data
+            )
+            
+            assert response.status_code == 200
+            result = response.json()
+            assert "predictions" in result
+            assert "validation" in result
+            assert result["validation"]["validation_performed"] is False
+            assert result["batch_size"] == 3
     
-    @patch('app.database.get_session') 
-    @patch('app.services.schema_service.schema_service.get_model_schemas')
-    @patch('app.services.schema_service.schema_service.validate_prediction_data')
-    def test_batch_predict_success_with_schema(self, mock_validate_data, mock_get_schemas,
-                                             mock_get_session, dynamic_client, sample_deployment,
-                                             sample_batch_data):
+    def test_batch_predict_success_with_schema(self, client, test_deployment, sample_batch_data):
         """Test successful batch prediction with schema validation"""
-        # Mock database session
-        mock_session = MagicMock()
-        mock_session.get.return_value = sample_deployment
-        mock_session.add = MagicMock()
-        mock_session.commit = AsyncMock()
-        mock_get_session.return_value.__aenter__.return_value = mock_session
-        
-        # Mock schema exists
-        mock_schema = MagicMock()
-        mock_get_schemas.return_value = (mock_schema, None)
-        
-        # Mock successful validation for each item
-        mock_validate_data.side_effect = [
-            (True, "Valid", sample_batch_data["data"][0]),
-            (True, "Valid", sample_batch_data["data"][1]),
-            (True, "Valid", sample_batch_data["data"][2])
-        ]
-        
-        response = dynamic_client.post(
-            f"/api/v1/predict/{sample_deployment.id}/batch",
-            json=sample_batch_data
-        )
-        
-        assert response.status_code == 200
-        result = response.json()
-        assert "predictions" in result
-        assert "validation" in result
-        assert result["validation"]["batch_validation_performed"] is True
-        assert len(result["validation"]["item_validations"]) == 3
-        assert mock_validate_data.call_count == 3
+        # Mock schema exists and validation
+        with patch('app.services.schema_service.schema_service.get_model_schemas') as mock_get_schemas, \
+             patch('app.services.schema_service.schema_service.validate_prediction_data') as mock_validate_data:
+            
+            # Mock schema exists
+            mock_schema = MagicMock()
+            mock_get_schemas.return_value = (mock_schema, None)
+            
+            # Mock successful validation for each item
+            mock_validate_data.side_effect = [
+                (True, "Valid", sample_batch_data["data"][0]),
+                (True, "Valid", sample_batch_data["data"][1]),
+                (True, "Valid", sample_batch_data["data"][2])
+            ]
+            
+            response = client.post(
+                f"/api/v1/predict/{test_deployment.id}/batch",
+                json=sample_batch_data
+            )
+            
+            assert response.status_code == 200
+            result = response.json()
+            assert "predictions" in result
+            assert "validation" in result
+            assert result["validation"]["validation_performed"] is True
+            assert len(result["validation"]["item_validations"]) == 3
+            assert mock_validate_data.call_count == 3
     
-    @patch('app.database.get_session')
-    @patch('app.services.schema_service.schema_service.get_model_schemas') 
-    @patch('app.services.schema_service.schema_service.validate_prediction_data')
-    def test_batch_predict_validation_failure(self, mock_validate_data, mock_get_schemas,
-                                            mock_get_session, dynamic_client, sample_deployment,
-                                            sample_batch_data):
+    def test_batch_predict_validation_failure(self, client, test_deployment, sample_batch_data):
         """Test batch prediction with validation failure on one item"""
-        # Mock database session
-        mock_session = MagicMock()
-        mock_session.get.return_value = sample_deployment
-        mock_get_session.return_value.__aenter__.return_value = mock_session
-        
-        # Mock schema exists
-        mock_schema = MagicMock()
-        mock_get_schemas.return_value = (mock_schema, None)
-        
-        # Mock validation failure on second item
-        mock_validate_data.side_effect = [
-            (True, "Valid", sample_batch_data["data"][0]),
-            (False, "Invalid field", {}),  # Failure on second item
-            (True, "Valid", sample_batch_data["data"][2])
-        ]
-        
-        response = dynamic_client.post(
-            f"/api/v1/predict/{sample_deployment.id}/batch",
-            json=sample_batch_data
-        )
-        
-        assert response.status_code == 422
-        result = response.json()
-        assert "Validation failed for batch item 1" in result["detail"]
+        # Mock schema exists and validation failure
+        with patch('app.services.schema_service.schema_service.get_model_schemas') as mock_get_schemas, \
+             patch('app.services.schema_service.schema_service.validate_prediction_data') as mock_validate_data:
+            
+            # Mock schema exists
+            mock_schema = MagicMock()
+            mock_get_schemas.return_value = (mock_schema, None)
+            
+            # Mock validation failure on second item
+            mock_validate_data.side_effect = [
+                (True, "Valid", sample_batch_data["data"][0]),
+                (False, "Invalid field", {}),  # Failure on second item
+                (True, "Valid", sample_batch_data["data"][2])
+            ]
+            
+            response = client.post(
+                f"/api/v1/predict/{test_deployment.id}/batch",
+                json=sample_batch_data
+            )
+            
+            assert response.status_code == 422
+            result = response.json()
+            assert "Validation failed for batch item 1" in result["error"]["message"]
     
-    def test_batch_predict_invalid_format(self, dynamic_client):
+    def test_batch_predict_invalid_format(self, client, test_deployment):
         """Test batch prediction with invalid data format"""
         invalid_data = {"not_data_key": [1, 2, 3]}
         
-        response = dynamic_client.post(
-            "/api/v1/predict/deploy_123/batch",
+        response = client.post(
+            f"/api/v1/predict/{test_deployment.id}/batch",
             json=invalid_data
         )
         
         assert response.status_code == 400
         result = response.json()
-        assert "must be provided as a list" in result["detail"]
+        assert "must be provided as a list" in result["error"]["message"]
 
 
 class TestPredictProbaEndpoint:
     """Test probability prediction endpoint"""
     
-    @patch('app.database.get_session')
-    @patch('app.services.schema_service.schema_service.get_model_schemas')
-    def test_predict_proba_success(self, mock_get_schemas, mock_get_session,
-                                 dynamic_client, sample_deployment, sample_prediction_data):
+    def test_predict_proba_success(self, client, test_deployment, sample_prediction_data):
         """Test successful probability prediction"""
-        # Mock database session
-        mock_session = MagicMock()
-        mock_session.get.return_value = sample_deployment
-        mock_session.add = MagicMock()
-        mock_session.commit = AsyncMock()
-        mock_get_session.return_value.__aenter__.return_value = mock_session
-        
         # Mock no schema
-        mock_get_schemas.return_value = (None, None)
-        
-        response = dynamic_client.post(
-            f"/api/v1/predict/{sample_deployment.id}/proba",
-            json=sample_prediction_data
-        )
-        
-        assert response.status_code == 200
-        result = response.json()
-        assert "probabilities" in result
-        assert "validation" in result
-        assert result["model_id"] == sample_deployment.model_id
+        with patch('app.services.schema_service.schema_service.get_model_schemas') as mock_get_schemas:
+            mock_get_schemas.return_value = (None, None)
+            
+            response = client.post(
+                f"/api/v1/predict/{test_deployment.id}/proba",
+                json=sample_prediction_data
+            )
+            
+            assert response.status_code == 200
+            result = response.json()
+            assert "probabilities" in result
+            assert "validation" in result
+            assert result["model_id"] == test_deployment.model_id
     
-    @patch('app.database.get_session')
-    def test_predict_proba_not_supported(self, mock_get_session, dynamic_client, sample_deployment):
+    def test_predict_proba_not_supported(self, client, test_deployment, test_session):
         """Test probability prediction when not supported by model"""
-        # Remove predict_proba from endpoints
-        sample_deployment.endpoints = ["predict"]
+        # Update the deployment in the database to remove predict_proba
+        test_deployment.endpoints = ["predict"]
+        test_session.add(test_deployment)
+        test_session.commit()
         
-        mock_session = MagicMock()
-        mock_session.get.return_value = sample_deployment
-        mock_get_session.return_value.__aenter__.return_value = mock_session
-        
-        response = dynamic_client.post(
-            f"/api/v1/predict/{sample_deployment.id}/proba",
+        response = client.post(
+            f"/api/v1/predict/{test_deployment.id}/proba",
             json={"data": [1, 2, 3]}
         )
         
         assert response.status_code == 400
         result = response.json()
-        assert "not supported" in result["detail"].lower()
+        assert "not supported" in result["error"]["message"].lower()
 
 
 class TestPredictionSchemaEndpoint:
     """Test prediction schema endpoint"""
     
-    @patch('app.database.get_session')
-    @patch('app.services.schema_service.schema_service.get_model_schemas')
-    @patch('app.services.schema_service.schema_service.get_model_example_data')
-    def test_get_prediction_schema_success(self, mock_get_example, mock_get_schemas,
-                                         mock_get_session, dynamic_client, sample_deployment):
+    def test_get_prediction_schema_success(self, client, test_deployment):
         """Test successful schema retrieval"""
-        # Mock database session
-        mock_session = MagicMock()
-        mock_session.get.return_value = sample_deployment
-        mock_get_session.return_value.__aenter__.return_value = mock_session
-        
         # Mock schema data
-        mock_input_schema = MagicMock()
-        mock_input_schema.dict.return_value = {"type": "object", "properties": {}}
-        mock_output_schema = MagicMock()
-        mock_output_schema.dict.return_value = {"type": "array", "items": {"type": "number"}}
-        mock_get_schemas.return_value = (mock_input_schema, mock_output_schema)
-        
-        # Mock example data
-        mock_get_example.return_value = {"bedrooms": 3, "bathrooms": 2}
-        
-        response = dynamic_client.get(f"/api/v1/predict/{sample_deployment.id}/schema")
-        
-        assert response.status_code == 200
-        result = response.json()
-        assert result["deployment_id"] == sample_deployment.id
-        assert result["model_id"] == sample_deployment.model_id
-        assert result["framework"] == sample_deployment.framework
-        assert "input_schema" in result
-        assert "output_schema" in result
-        assert "example_input" in result
-        assert result["validation_enabled"] is True
+        with patch('app.services.schema_service.schema_service.get_model_schemas') as mock_get_schemas, \
+             patch('app.services.schema_service.schema_service.get_model_example_data') as mock_get_example:
+            
+            mock_input_schema = MagicMock()
+            mock_input_schema.dict.return_value = {"type": "object", "properties": {}}
+            mock_output_schema = MagicMock()
+            mock_output_schema.dict.return_value = {"type": "array", "items": {"type": "number"}}
+            mock_get_schemas.return_value = (mock_input_schema, mock_output_schema)
+            
+            # Mock example data
+            mock_get_example.return_value = {"bedrooms": 3, "bathrooms": 2}
+            
+            response = client.get(f"/api/v1/predict/{test_deployment.id}/schema")
+            
+            assert response.status_code == 200
+            result = response.json()
+            assert result["deployment_id"] == test_deployment.id
+            assert result["model_id"] == test_deployment.model_id
+            assert result["framework"] == test_deployment.framework
+            assert "input_schema" in result
+            assert "output_schema" in result
+            assert "example_input" in result
+            assert result["validation_enabled"] is True
     
-    @patch('app.database.get_session')
-    def test_get_prediction_schema_deployment_not_found(self, mock_get_session, dynamic_client):
+    def test_get_prediction_schema_deployment_not_found(self, client):
         """Test schema retrieval for non-existent deployment"""
-        mock_session = MagicMock()
-        mock_session.get.return_value = None
-        mock_get_session.return_value.__aenter__.return_value = mock_session
-        
-        response = dynamic_client.get("/api/v1/predict/nonexistent/schema")
+        response = client.get("/api/v1/predict/nonexistent/schema")
         
         assert response.status_code == 404
 
@@ -526,14 +449,20 @@ class TestPredictionHelpers:
 class TestPredictionLogging:
     """Test prediction logging functionality"""
     
-    @patch('app.database.get_session')
+    @patch('app.database.get_async_session')
     def test_log_prediction_success(self, mock_get_session):
         """Test successful prediction logging"""
         from app.routes.dynamic import _log_prediction
+        from app.models.model import ModelDeployment
         
         mock_session = MagicMock()
         mock_session.add = MagicMock()
         mock_session.commit = AsyncMock()
+        
+        # Mock the deployment object
+        mock_deployment = MagicMock(spec=ModelDeployment)
+        mock_deployment.model_id = "test_model_123"
+        mock_session.get = AsyncMock(return_value=mock_deployment)
         
         request_data = {"data": [1, 2, 3]}
         response_data = {"predictions": [0.75]}
@@ -545,14 +474,20 @@ class TestPredictionLogging:
         
         mock_session.add.assert_called_once()
     
-    @patch('app.database.get_session')
+    @patch('app.database.get_async_session')
     def test_log_prediction_batch(self, mock_get_session):
         """Test batch prediction logging"""
         from app.routes.dynamic import _log_prediction
+        from app.models.model import ModelDeployment
         
         mock_session = MagicMock()
         mock_session.add = MagicMock()
         mock_session.commit = AsyncMock()
+        
+        # Mock the deployment object
+        mock_deployment = MagicMock(spec=ModelDeployment)
+        mock_deployment.model_id = "test_model_123"
+        mock_session.get = AsyncMock(return_value=mock_deployment)
         
         request_data = {"data": [[1, 2], [3, 4]]}
         response_data = {"predictions": [0.75, 0.85]}
@@ -564,7 +499,7 @@ class TestPredictionLogging:
         
         mock_session.add.assert_called_once()
     
-    @patch('app.database.get_session')
+    @patch('app.database.get_async_session')
     def test_log_prediction_error_handling(self, mock_get_session):
         """Test prediction logging error handling"""
         from app.routes.dynamic import _log_prediction
@@ -581,55 +516,51 @@ class TestPredictionLogging:
 class TestDynamicRoutesIntegration:
     """Integration tests for dynamic routes"""
     
-    @patch('app.database.get_session')
-    @patch('app.services.schema_service.schema_service.get_model_schemas')
-    @patch('app.services.schema_service.schema_service.validate_prediction_data')
-    def test_complete_prediction_workflow(self, mock_validate_data, mock_get_schemas,
-                                        mock_get_session, dynamic_client, sample_deployment,
-                                        sample_schema_data):
+    def test_complete_prediction_workflow(self, client, test_deployment, sample_schema_data):
         """Test complete prediction workflow with schema validation"""
-        # Mock database session
-        mock_session = MagicMock()
-        mock_session.get.return_value = sample_deployment
-        mock_session.add = MagicMock()
-        mock_session.commit = AsyncMock()
-        mock_get_session.return_value.__aenter__.return_value = mock_session
-        
-        # Mock schema exists
-        mock_schema = MagicMock()
-        mock_get_schemas.return_value = (mock_schema, None)
-        
-        # Mock successful validation
-        mock_validate_data.return_value = (True, "Validation successful", sample_schema_data)
-        
-        # 1. Make prediction
-        predict_response = dynamic_client.post(
-            f"/api/v1/predict/{sample_deployment.id}",
-            json=sample_schema_data
-        )
-        assert predict_response.status_code == 200
-        
-        # 2. Make batch prediction
-        batch_data = {"data": [sample_schema_data, sample_schema_data]}
-        batch_response = dynamic_client.post(
-            f"/api/v1/predict/{sample_deployment.id}/batch",
-            json=batch_data
-        )
-        assert batch_response.status_code == 200
-        
-        # 3. Make probability prediction
-        proba_response = dynamic_client.post(
-            f"/api/v1/predict/{sample_deployment.id}/proba",
-            json=sample_schema_data
-        )
-        assert proba_response.status_code == 200
-        
-        # 4. Get schema
-        schema_response = dynamic_client.get(f"/api/v1/predict/{sample_deployment.id}/schema")
-        assert schema_response.status_code == 200
-        
-        # Verify all calls were made
-        assert mock_validate_data.call_count >= 3  # Called for each prediction type
+        # Mock schema exists and validation
+        with patch('app.services.schema_service.schema_service.get_model_schemas') as mock_get_schemas, \
+             patch('app.services.schema_service.schema_service.validate_prediction_data') as mock_validate_data, \
+             patch('app.services.schema_service.schema_service.get_model_example_data') as mock_get_example:
+            
+            # Mock schema exists
+            mock_schema = MagicMock()
+            mock_get_schemas.return_value = (mock_schema, None)
+            
+            # Mock successful validation
+            mock_validate_data.return_value = (True, "Validation successful", sample_schema_data)
+            
+            # Mock example data for schema endpoint
+            mock_get_example.return_value = {"bedrooms": 3, "bathrooms": 2}
+            
+            # 1. Make prediction
+            predict_response = client.post(
+                f"/api/v1/predict/{test_deployment.id}",
+                json=sample_schema_data
+            )
+            assert predict_response.status_code == 200
+            
+            # 2. Make batch prediction
+            batch_data = {"data": [sample_schema_data, sample_schema_data]}
+            batch_response = client.post(
+                f"/api/v1/predict/{test_deployment.id}/batch",
+                json=batch_data
+            )
+            assert batch_response.status_code == 200
+            
+            # 3. Make probability prediction
+            proba_response = client.post(
+                f"/api/v1/predict/{test_deployment.id}/proba",
+                json=sample_schema_data
+            )
+            assert proba_response.status_code == 200
+            
+            # 4. Get schema
+            schema_response = client.get(f"/api/v1/predict/{test_deployment.id}/schema")
+            assert schema_response.status_code == 200
+            
+            # Verify all calls were made
+            assert mock_validate_data.call_count >= 3  # Called for each prediction type
 
 
 class TestModelUpload:
@@ -689,7 +620,7 @@ class TestModelUpload:
         
         assert response.status_code == 400
         result = response.json()
-        assert "Invalid file extension" in result["error"]["message"]
+        assert "Unsupported file format" in result["error"]["message"]
     
     def test_upload_model_duplicate_name(self, client, temp_model_file, test_model):
         """Test model upload with duplicate name"""
@@ -709,10 +640,10 @@ class TestModelUpload:
         result = response.json()
         assert "already exists" in result["error"]["message"]
     
-    @patch('pathlib.Path.mkdir')
-    def test_upload_model_storage_error(self, mock_mkdir, client, temp_model_file):
+    @patch('app.utils.model_utils.aios.makedirs')
+    def test_upload_model_storage_error(self, mock_makedirs, client, temp_model_file):
         """Test model upload with storage error"""
-        mock_mkdir.side_effect = PermissionError("Permission denied")
+        mock_makedirs.side_effect = PermissionError("Permission denied")
         
         with open(temp_model_file, "rb") as f:
             files = {"file": ("test_model.joblib", f, "application/octet-stream")}

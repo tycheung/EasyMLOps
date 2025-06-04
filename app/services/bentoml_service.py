@@ -12,9 +12,22 @@ import logging
 import json
 import uuid
 from datetime import datetime
+import asyncio
+import aiofiles
+import aiofiles.os as aios
+import pickle
 
-import bentoml
-from bentoml import Service
+# Lazy import for BentoML to avoid configuration issues during testing
+try:
+    import bentoml
+    from bentoml import Service
+    BENTOML_AVAILABLE = True
+except Exception as e:
+    bentoml = None
+    Service = None
+    BENTOML_AVAILABLE = False
+    # Don't log during import - will be logged when actually needed
+
 import pandas as pd
 import numpy as np
 
@@ -28,35 +41,60 @@ from app.services.schema_service import schema_service
 settings = get_settings()
 logger = logging.getLogger(__name__)
 
+# Import joblib for tests
+try:
+    import joblib
+    JOBLIB_AVAILABLE = True
+except ImportError:
+    joblib = None
+    JOBLIB_AVAILABLE = False
+
 # Optional imports for ML frameworks
 try:
     import sklearn
     SKLEARN_AVAILABLE = True
 except ImportError:
+    sklearn = None
     SKLEARN_AVAILABLE = False
 
 try:
     import tensorflow as tf
     TENSORFLOW_AVAILABLE = True
 except ImportError:
+    tf = None
+    TENSORFLOW_AVAILABLE = False
+except Exception as e:
+    # Handle matplotlib and other import errors
+    tf = None
     TENSORFLOW_AVAILABLE = False
 
 try:
     import torch
     PYTORCH_AVAILABLE = True
 except ImportError:
+    torch = None
     PYTORCH_AVAILABLE = False
 
 try:
     import xgboost as xgb
     XGBOOST_AVAILABLE = True
 except ImportError:
+    xgb = None
+    XGBOOST_AVAILABLE = False
+except Exception as e:
+    # Handle XGBoost library not found and other import errors
+    xgb = None
     XGBOOST_AVAILABLE = False
 
 try:
     import lightgbm as lgb
     LIGHTGBM_AVAILABLE = True
 except ImportError:
+    lgb = None
+    LIGHTGBM_AVAILABLE = False
+except Exception as e:
+    # Handle LightGBM library not found and other import errors
+    lgb = None
     LIGHTGBM_AVAILABLE = False
 
 
@@ -70,6 +108,10 @@ class BentoMLServiceManager:
     async def create_service_for_model(self, model_id: str, deployment_config: Dict[str, Any] = None) -> Tuple[bool, str, Dict[str, Any]]:
         """Create a BentoML service for a specific model"""
         try:
+            if not BENTOML_AVAILABLE:
+                logger.warning("BentoML not available - service creation disabled")
+                return False, "BentoML not available", {}
+            
             # Get model from database
             async with get_session() as session:
                 model = await session.get(Model, model_id)
@@ -78,7 +120,7 @@ class BentoMLServiceManager:
             
             # Load and validate the model
             model_path = model.file_path
-            if not os.path.exists(model_path):
+            if not await aios.path.exists(model_path):
                 return False, f"Model file not found: {model_path}", {}
             
             # Create the service based on framework
@@ -123,21 +165,36 @@ class BentoMLServiceManager:
     async def _create_sklearn_service(self, model: Model, service_name: str, config: Dict[str, Any]) -> Tuple[bool, str, Dict[str, Any]]:
         """Create BentoML service for sklearn models"""
         try:
+            if not BENTOML_AVAILABLE:
+                return False, "BentoML not available", {}
             if not SKLEARN_AVAILABLE:
                 return False, "sklearn not available", {}
-            
-            # Load the model
-            import joblib
+            if not JOBLIB_AVAILABLE: # Assuming joblib is primary for sklearn persistence
+                return False, "joblib not available for loading sklearn model", {}
+
+            # Load the model asynchronously
+            loaded_model = None
             try:
-                loaded_model = joblib.load(model.file_path)
-            except:
-                import pickle
-                with open(model.file_path, 'rb') as f:
-                    loaded_model = pickle.load(f)
+                # Try joblib first
+                loaded_model = await asyncio.to_thread(joblib.load, model.file_path)
+            except Exception as e_joblib:
+                logger.warning(f"Failed to load model {model.file_path} with joblib: {e_joblib}, trying pickle.")
+                try:
+                    # Fallback to pickle
+                    async with aiofiles.open(model.file_path, 'rb') as f:
+                        model_bytes = await f.read()
+                    loaded_model = await asyncio.to_thread(pickle.loads, model_bytes)
+                except Exception as e_pickle:
+                    logger.error(f"Failed to load model {model.file_path} with pickle after joblib failed: {e_pickle}")
+                    return False, f"Failed to load model file: {e_pickle}", {}
             
-            # Save model to BentoML model store
-            bento_model = bentoml.sklearn.save_model(
-                name=f"sklearn_model_{model.id}",
+            if loaded_model is None:
+                 return False, f"Model {model.file_path} could not be loaded.", {}
+
+            # Save model to BentoML model store asynchronously
+            bento_model_tag_obj = await asyncio.to_thread(
+                bentoml.sklearn.save_model,
+                name=f"sklearn_model_{model.id.replace('-','_')}", # Ensure name is valid
                 model=loaded_model,
                 labels={
                     "framework": "sklearn",
@@ -145,23 +202,24 @@ class BentoMLServiceManager:
                     "original_name": model.name
                 }
             )
+            bento_model_tag = str(bento_model_tag_obj)
             
-            # Create service definition
+            # Create service definition (CPU-bound, can stay sync)
             service_code = self._generate_sklearn_service_code(
-                model, bento_model.tag, config or {}
+                model, bento_model_tag, config or {}
             )
             
-            # Write service file
-            service_path = os.path.join(settings.BENTOS_DIR, f"{service_name}.py")
-            os.makedirs(os.path.dirname(service_path), exist_ok=True)
+            # Write service file asynchronously
+            service_path_obj = Path(settings.BENTOS_DIR) / f"{service_name}.py"
+            await aios.makedirs(service_path_obj.parent, exist_ok=True)
             
-            with open(service_path, 'w') as f:
-                f.write(service_code)
+            async with aiofiles.open(service_path_obj, 'w') as f:
+                await f.write(service_code)
             
             service_info = {
                 'service_name': service_name,
-                'service_path': service_path,
-                'bento_model_tag': str(bento_model.tag),
+                'service_path': str(service_path_obj),
+                'bento_model_tag': bento_model_tag,
                 'framework': 'sklearn',
                 'endpoints': ['predict', 'predict_proba'] if model.model_type == ModelType.CLASSIFICATION else ['predict']
             }
@@ -169,7 +227,7 @@ class BentoMLServiceManager:
             return True, "sklearn service created successfully", service_info
             
         except Exception as e:
-            logger.error(f"Error creating sklearn service: {e}")
+            logger.error(f"Error creating sklearn service for {model.id}: {e}", exc_info=True)
             return False, str(e), {}
     
     async def _create_tensorflow_service(self, model: Model, service_name: str, config: Dict[str, Any]) -> Tuple[bool, str, Dict[str, Any]]:
@@ -178,65 +236,61 @@ class BentoMLServiceManager:
             if not TENSORFLOW_AVAILABLE:
                 return False, "TensorFlow not available", {}
             
-            # Load the model based on format
-            file_ext = Path(model.file_path).suffix.lower()
-            
+            model_file_path = Path(model.file_path)
+            file_ext = model_file_path.suffix.lower()
+            loaded_model = None
+
+            # Load the model asynchronously
             if file_ext == '.h5':
-                loaded_model = tf.keras.models.load_model(model.file_path)
-            elif os.path.isdir(model.file_path):
-                loaded_model = tf.saved_model.load(model.file_path)
-            elif file_ext in ['.pkl', '.joblib']:
-                import joblib
-                loaded_model = joblib.load(model.file_path)
+                loaded_model = await asyncio.to_thread(tf.keras.models.load_model, model.file_path)
+            elif await aios.path.isdir(model.file_path): # Check if it's a directory (for SavedModel)
+                loaded_model = await asyncio.to_thread(tf.saved_model.load, model.file_path)
+            elif file_ext in ['.pkl', '.joblib'] and JOBLIB_AVAILABLE:
+                loaded_model = await asyncio.to_thread(joblib.load, model.file_path)
             else:
-                return False, f"Unsupported TensorFlow model format: {file_ext}", {}
+                return False, f"Unsupported TensorFlow model format or missing directory: {model.file_path}", {}
+
+            if loaded_model is None:
+                return False, f"TensorFlow model {model.file_path} could not be loaded.", {}
+
+            # Save model to BentoML model store asynchronously
+            save_func = bentoml.keras.save_model if hasattr(loaded_model, 'layers') else bentoml.tensorflow.save_model
+            bento_model_tag_obj = await asyncio.to_thread(
+                save_func,
+                name=f"tensorflow_model_{model.id.replace('-','_')}", # Ensure name is valid
+                model=loaded_model,
+                labels={
+                    "framework": "tensorflow",
+                    "model_type": model.model_type.value if model.model_type else "unknown",
+                    "original_name": model.name
+                }
+            )
+            bento_model_tag = str(bento_model_tag_obj)
             
-            # Save model to BentoML model store
-            if hasattr(loaded_model, 'layers'):  # Keras model
-                bento_model = bentoml.keras.save_model(
-                    name=f"tensorflow_model_{model.id}",
-                    model=loaded_model,
-                    labels={
-                        "framework": "tensorflow",
-                        "model_type": model.model_type.value if model.model_type else "unknown",
-                        "original_name": model.name
-                    }
-                )
-            else:  # SavedModel
-                bento_model = bentoml.tensorflow.save_model(
-                    name=f"tensorflow_model_{model.id}",
-                    model=loaded_model,
-                    labels={
-                        "framework": "tensorflow",
-                        "model_type": model.model_type.value if model.model_type else "unknown",
-                        "original_name": model.name
-                    }
-                )
-            
-            # Create service definition
+            # Create service definition (CPU-bound, can stay sync)
             service_code = self._generate_tensorflow_service_code(
-                model, bento_model.tag, config or {}
+                model, bento_model_tag, config or {}
             )
             
-            # Write service file
-            service_path = os.path.join(settings.BENTOS_DIR, f"{service_name}.py")
-            os.makedirs(os.path.dirname(service_path), exist_ok=True)
+            # Write service file asynchronously
+            service_path_obj = Path(settings.BENTOS_DIR) / f"{service_name}.py"
+            await aios.makedirs(service_path_obj.parent, exist_ok=True)
             
-            with open(service_path, 'w') as f:
-                f.write(service_code)
+            async with aiofiles.open(service_path_obj, 'w') as f:
+                await f.write(service_code)
             
             service_info = {
                 'service_name': service_name,
-                'service_path': service_path,
-                'bento_model_tag': str(bento_model.tag),
+                'service_path': str(service_path_obj),
+                'bento_model_tag': bento_model_tag,
                 'framework': 'tensorflow',
-                'endpoints': ['predict']
+                'endpoints': ['predict'] # TensorFlow services typically have a predict endpoint
             }
             
             return True, "TensorFlow service created successfully", service_info
             
         except Exception as e:
-            logger.error(f"Error creating TensorFlow service: {e}")
+            logger.error(f"Error creating TensorFlow service for {model.id}: {e}", exc_info=True)
             return False, str(e), {}
     
     async def _create_pytorch_service(self, model: Model, service_name: str, config: Dict[str, Any]) -> Tuple[bool, str, Dict[str, Any]]:
@@ -245,20 +299,26 @@ class BentoMLServiceManager:
             if not PYTORCH_AVAILABLE:
                 return False, "PyTorch not available", {}
             
-            # Load the model
-            file_ext = Path(model.file_path).suffix.lower()
-            
+            model_file_path = Path(model.file_path)
+            file_ext = model_file_path.suffix.lower()
+            loaded_model = None
+
+            # Load the model asynchronously
             if file_ext in ['.pt', '.pth']:
-                loaded_model = torch.load(model.file_path, map_location='cpu')
-            elif file_ext in ['.pkl', '.joblib']:
-                import joblib
-                loaded_model = joblib.load(model.file_path)
+                # torch.load itself does file I/O, so wrap the call
+                loaded_model = await asyncio.to_thread(torch.load, model.file_path, map_location='cpu')
+            elif file_ext in ['.pkl', '.joblib'] and JOBLIB_AVAILABLE:
+                loaded_model = await asyncio.to_thread(joblib.load, model.file_path)
             else:
                 return False, f"Unsupported PyTorch model format: {file_ext}", {}
-            
-            # Save model to BentoML model store
-            bento_model = bentoml.pytorch.save_model(
-                name=f"pytorch_model_{model.id}",
+
+            if loaded_model is None:
+                return False, f"PyTorch model {model.file_path} could not be loaded.", {}
+
+            # Save model to BentoML model store asynchronously
+            bento_model_tag_obj = await asyncio.to_thread(
+                bentoml.pytorch.save_model,
+                name=f"pytorch_model_{model.id.replace('-','_')}", # Ensure name is valid
                 model=loaded_model,
                 labels={
                     "framework": "pytorch",
@@ -266,31 +326,32 @@ class BentoMLServiceManager:
                     "original_name": model.name
                 }
             )
+            bento_model_tag = str(bento_model_tag_obj)
             
-            # Create service definition
+            # Create service definition (CPU-bound)
             service_code = self._generate_pytorch_service_code(
-                model, bento_model.tag, config or {}
+                model, bento_model_tag, config or {}
             )
             
-            # Write service file
-            service_path = os.path.join(settings.BENTOS_DIR, f"{service_name}.py")
-            os.makedirs(os.path.dirname(service_path), exist_ok=True)
+            # Write service file asynchronously
+            service_path_obj = Path(settings.BENTOS_DIR) / f"{service_name}.py"
+            await aios.makedirs(service_path_obj.parent, exist_ok=True)
             
-            with open(service_path, 'w') as f:
-                f.write(service_code)
+            async with aiofiles.open(service_path_obj, 'w') as f:
+                await f.write(service_code)
             
             service_info = {
                 'service_name': service_name,
-                'service_path': service_path,
-                'bento_model_tag': str(bento_model.tag),
+                'service_path': str(service_path_obj),
+                'bento_model_tag': bento_model_tag,
                 'framework': 'pytorch',
-                'endpoints': ['predict']
+                'endpoints': ['predict'] # PyTorch services typically have a predict endpoint
             }
             
             return True, "PyTorch service created successfully", service_info
             
         except Exception as e:
-            logger.error(f"Error creating PyTorch service: {e}")
+            logger.error(f"Error creating PyTorch service for {model.id}: {e}", exc_info=True)
             return False, str(e), {}
     
     async def _create_xgboost_service(self, model: Model, service_name: str, config: Dict[str, Any]) -> Tuple[bool, str, Dict[str, Any]]:
@@ -298,19 +359,36 @@ class BentoMLServiceManager:
         try:
             if not XGBOOST_AVAILABLE:
                 return False, "XGBoost not available", {}
-            
-            # Load the model
-            import joblib
+            if not JOBLIB_AVAILABLE: # Assuming joblib or pickle for persistence
+                # We also need pickle for fallback
+                import pickle # Ensure pickle is imported for the fallback logic
+
+            # Load the model asynchronously
+            loaded_model = None
             try:
-                loaded_model = joblib.load(model.file_path)
-            except:
-                import pickle
-                with open(model.file_path, 'rb') as f:
-                    loaded_model = pickle.load(f)
+                # Try joblib first
+                if JOBLIB_AVAILABLE:
+                    loaded_model = await asyncio.to_thread(joblib.load, model.file_path)
+                else:
+                    raise ImportError("Joblib not available, trying pickle directly.") # Force fallback
+            except Exception as e_joblib:
+                logger.warning(f"Failed to load model {model.file_path} with joblib: {e_joblib}, trying pickle.")
+                try:
+                    # Fallback to pickle
+                    async with aiofiles.open(model.file_path, 'rb') as f:
+                        model_bytes = await f.read()
+                    loaded_model = await asyncio.to_thread(pickle.loads, model_bytes)
+                except Exception as e_pickle:
+                    logger.error(f"Failed to load model {model.file_path} with pickle after joblib failed: {e_pickle}")
+                    return False, f"Failed to load model file: {e_pickle}", {}
             
-            # Save model to BentoML model store
-            bento_model = bentoml.xgboost.save_model(
-                name=f"xgboost_model_{model.id}",
+            if loaded_model is None:
+                return False, f"XGBoost model {model.file_path} could not be loaded.", {}
+
+            # Save model to BentoML model store asynchronously
+            bento_model_tag_obj = await asyncio.to_thread(
+                bentoml.xgboost.save_model,
+                name=f"xgboost_model_{model.id.replace('-','_')}", # Ensure name is valid
                 model=loaded_model,
                 labels={
                     "framework": "xgboost",
@@ -318,23 +396,24 @@ class BentoMLServiceManager:
                     "original_name": model.name
                 }
             )
+            bento_model_tag = str(bento_model_tag_obj)
             
-            # Create service definition
+            # Create service definition (CPU-bound)
             service_code = self._generate_xgboost_service_code(
-                model, bento_model.tag, config or {}
+                model, bento_model_tag, config or {}
             )
             
-            # Write service file
-            service_path = os.path.join(settings.BENTOS_DIR, f"{service_name}.py")
-            os.makedirs(os.path.dirname(service_path), exist_ok=True)
+            # Write service file asynchronously
+            service_path_obj = Path(settings.BENTOS_DIR) / f"{service_name}.py"
+            await aios.makedirs(service_path_obj.parent, exist_ok=True)
             
-            with open(service_path, 'w') as f:
-                f.write(service_code)
+            async with aiofiles.open(service_path_obj, 'w') as f:
+                await f.write(service_code)
             
             service_info = {
                 'service_name': service_name,
-                'service_path': service_path,
-                'bento_model_tag': str(bento_model.tag),
+                'service_path': str(service_path_obj),
+                'bento_model_tag': bento_model_tag,
                 'framework': 'xgboost',
                 'endpoints': ['predict', 'predict_proba'] if model.model_type == ModelType.CLASSIFICATION else ['predict']
             }
@@ -342,7 +421,7 @@ class BentoMLServiceManager:
             return True, "XGBoost service created successfully", service_info
             
         except Exception as e:
-            logger.error(f"Error creating XGBoost service: {e}")
+            logger.error(f"Error creating XGBoost service for {model.id}: {e}", exc_info=True)
             return False, str(e), {}
     
     async def _create_lightgbm_service(self, model: Model, service_name: str, config: Dict[str, Any]) -> Tuple[bool, str, Dict[str, Any]]:
@@ -350,19 +429,34 @@ class BentoMLServiceManager:
         try:
             if not LIGHTGBM_AVAILABLE:
                 return False, "LightGBM not available", {}
-            
-            # Load the model
-            import joblib
+            # Ensure joblib or pickle is available for model loading
+            if not JOBLIB_AVAILABLE:
+                 import pickle # Ensure pickle is imported for the fallback logic
+
+            # Load the model asynchronously
+            loaded_model = None
             try:
-                loaded_model = joblib.load(model.file_path)
-            except:
-                import pickle
-                with open(model.file_path, 'rb') as f:
-                    loaded_model = pickle.load(f)
+                if JOBLIB_AVAILABLE:
+                    loaded_model = await asyncio.to_thread(joblib.load, model.file_path)
+                else:
+                    raise ImportError("Joblib not available, trying pickle directly.")
+            except Exception as e_joblib:
+                logger.warning(f"Failed to load model {model.file_path} with joblib: {e_joblib}, trying pickle.")
+                try:
+                    async with aiofiles.open(model.file_path, 'rb') as f:
+                        model_bytes = await f.read()
+                    loaded_model = await asyncio.to_thread(pickle.loads, model_bytes)
+                except Exception as e_pickle:
+                    logger.error(f"Failed to load model {model.file_path} with pickle after joblib failed: {e_pickle}")
+                    return False, f"Failed to load model file: {e_pickle}", {}
             
-            # Save model to BentoML model store
-            bento_model = bentoml.lightgbm.save_model(
-                name=f"lightgbm_model_{model.id}",
+            if loaded_model is None:
+                return False, f"LightGBM model {model.file_path} could not be loaded.", {}
+
+            # Save model to BentoML model store asynchronously
+            bento_model_tag_obj = await asyncio.to_thread(
+                bentoml.lightgbm.save_model,
+                name=f"lightgbm_model_{model.id.replace('-','_')}", # Ensure name is valid
                 model=loaded_model,
                 labels={
                     "framework": "lightgbm",
@@ -370,23 +464,24 @@ class BentoMLServiceManager:
                     "original_name": model.name
                 }
             )
+            bento_model_tag = str(bento_model_tag_obj)
             
-            # Create service definition
+            # Create service definition (CPU-bound)
             service_code = self._generate_lightgbm_service_code(
-                model, bento_model.tag, config or {}
+                model, bento_model_tag, config or {}
             )
             
-            # Write service file
-            service_path = os.path.join(settings.BENTOS_DIR, f"{service_name}.py")
-            os.makedirs(os.path.dirname(service_path), exist_ok=True)
+            # Write service file asynchronously
+            service_path_obj = Path(settings.BENTOS_DIR) / f"{service_name}.py"
+            await aios.makedirs(service_path_obj.parent, exist_ok=True)
             
-            with open(service_path, 'w') as f:
-                f.write(service_code)
+            async with aiofiles.open(service_path_obj, 'w') as f:
+                await f.write(service_code)
             
             service_info = {
                 'service_name': service_name,
-                'service_path': service_path,
-                'bento_model_tag': str(bento_model.tag),
+                'service_path': str(service_path_obj),
+                'bento_model_tag': bento_model_tag,
                 'framework': 'lightgbm',
                 'endpoints': ['predict', 'predict_proba'] if model.model_type == ModelType.CLASSIFICATION else ['predict']
             }
@@ -394,7 +489,7 @@ class BentoMLServiceManager:
             return True, "LightGBM service created successfully", service_info
             
         except Exception as e:
-            logger.error(f"Error creating LightGBM service: {e}")
+            logger.error(f"Error creating LightGBM service for {model.id}: {e}", exc_info=True)
             return False, str(e), {}
     
     def _generate_sklearn_service_code(self, model: Model, bento_model_tag: str, config: Dict[str, Any]) -> str:

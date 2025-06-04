@@ -58,11 +58,13 @@ class ModelStatus(str, Enum):
 
 class DeploymentStatus(str, Enum):
     """Deployment status"""
-    ACTIVE = "active"
-    STOPPED = "stopped"
-    FAILED = "failed"
+    PENDING = "pending"
     DEPLOYING = "deploying"
+    ACTIVE = "active"
+    RUNNING = "running"  # Alias for ACTIVE for backward compatibility
+    STOPPED = "stopped"
     STOPPING = "stopping"
+    FAILED = "failed"
 
 
 # Input/Output Schema Definition

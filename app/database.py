@@ -110,6 +110,21 @@ def get_db() -> Generator[Session, None, None]:
             raise
 
 
+async def get_async_session() -> AsyncGenerator[AsyncSession, None]:
+    """
+    Async database session dependency for FastAPI
+    Creates a new async database session for each request
+    """
+    async with AsyncSessionLocal() as session:
+        try:
+            yield session
+            await session.commit()
+        except Exception as e:
+            logger.error(f"Async database session error: {e}")
+            await session.rollback()
+            raise
+
+
 @asynccontextmanager
 async def get_session() -> AsyncGenerator[AsyncSession, None]:
     """

@@ -97,7 +97,26 @@ async def update_deployment(deployment_id: str, update_data: ModelDeploymentUpda
     return deployment
 
 
-@router.delete("/{deployment_id}")
+@router.put("/{deployment_id}", response_model=ModelDeploymentResponse)
+async def update_deployment_put(deployment_id: str, update_data: ModelDeploymentUpdate):
+    """
+    Update a deployment (PUT method)
+    
+    Allows updating deployment name, description, configuration, and status.
+    Changing status to STOPPED will undeploy the service, and changing back to ACTIVE will redeploy it.
+    """
+    success, message, deployment = await deployment_service.update_deployment(deployment_id, update_data)
+    
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=message
+        )
+    
+    return deployment
+
+
+@router.delete("/{deployment_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_deployment(deployment_id: str):
     """
     Delete a deployment
@@ -108,15 +127,18 @@ async def delete_deployment(deployment_id: str):
     success, message = await deployment_service.delete_deployment(deployment_id)
     
     if not success:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=message
-        )
+        if "not found" in message.lower():
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=message
+            )
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=message
+            )
     
-    return JSONResponse(
-        status_code=status.HTTP_200_OK,
-        content={"message": message}
-    )
+    return None  # 204 No Content
 
 
 @router.get("/{deployment_id}/status")
@@ -190,8 +212,7 @@ async def start_deployment(deployment_id: str):
     
     Redeploys the service and changes status to ACTIVE.
     """
-    update_data = ModelDeploymentUpdate(status=DeploymentStatus.ACTIVE)
-    success, message, deployment = await deployment_service.update_deployment(deployment_id, update_data)
+    success, message = await deployment_service.start_deployment(deployment_id)
     
     if not success:
         raise HTTPException(
@@ -201,7 +222,7 @@ async def start_deployment(deployment_id: str):
     
     return JSONResponse(
         status_code=status.HTTP_200_OK,
-        content={"message": "Deployment started successfully", "deployment": deployment.dict()}
+        content={"message": "Deployment started successfully"}
     )
 
 
@@ -213,8 +234,7 @@ async def stop_deployment(deployment_id: str):
     Undeploys the service and changes status to STOPPED.
     The deployment record is preserved and can be restarted later.
     """
-    update_data = ModelDeploymentUpdate(status=DeploymentStatus.STOPPED)
-    success, message, deployment = await deployment_service.update_deployment(deployment_id, update_data)
+    success, message = await deployment_service.stop_deployment(deployment_id)
     
     if not success:
         raise HTTPException(
@@ -224,5 +244,26 @@ async def stop_deployment(deployment_id: str):
     
     return JSONResponse(
         status_code=status.HTTP_200_OK,
-        content={"message": "Deployment stopped successfully", "deployment": deployment.dict()}
+        content={"message": "Deployment stopped successfully"}
+    )
+
+
+@router.post("/{deployment_id}/scale")
+async def scale_deployment(deployment_id: str, scale_data: Dict[str, Any]):
+    """
+    Scale a deployment
+    
+    Updates the scaling configuration for the deployment.
+    """
+    success, message = await deployment_service.scale_deployment(deployment_id, scale_data)
+    
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=message
+        )
+    
+    return JSONResponse(
+        status_code=status.HTTP_200_OK,
+        content={"message": "Deployment scaled successfully"}
     ) 

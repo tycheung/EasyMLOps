@@ -6,15 +6,21 @@ Automatically generates and manages prediction routes for deployed models
 import json
 from typing import Dict, Any, Optional
 from datetime import datetime
-from fastapi import APIRouter, HTTPException, status, Request
+from fastapi import APIRouter, HTTPException, status, Request, Depends
 from fastapi.responses import JSONResponse
 import httpx
 import logging
+import asyncio
+import time
+from sqlalchemy.ext.asyncio import AsyncSession
+import uuid
 
-from app.database import get_session
-from app.models.model import ModelDeployment, ModelPrediction
+from app.database import get_async_session
+from app.models.model import ModelDeployment
 from app.schemas.model import DeploymentStatus
 from app.services.schema_service import schema_service
+from app.services.monitoring_service import monitoring_service
+from app.models.monitoring import PredictionLogDB
 
 logger = logging.getLogger(__name__)
 
@@ -33,10 +39,10 @@ class DynamicRouteManager:
             route_info = {
                 'deployment_id': deployment.id,
                 'model_id': deployment.model_id,
-                'service_name': deployment.service_name,
-                'endpoint_url': deployment.endpoint_url,
-                'framework': deployment.framework,
-                'endpoints': deployment.endpoints,
+                'service_name': deployment.deployment_name,
+                'endpoint_url': deployment.deployment_url,
+                'framework': getattr(deployment, 'framework', 'unknown'),
+                'endpoints': ['predict', 'predict_proba'],
                 'created_at': datetime.utcnow()
             }
             
@@ -66,7 +72,7 @@ route_manager = DynamicRouteManager()
 
 
 @router.post("/predict/{deployment_id}")
-async def predict(deployment_id: str, request: Request):
+async def predict(deployment_id: str, request: Request, session: AsyncSession = Depends(get_async_session)):
     """
     Universal prediction endpoint for deployed models with schema validation
     
@@ -111,296 +117,59 @@ async def predict(deployment_id: str, request: Request):
     ```
     """
     try:
-        async with get_session() as session:
-            # Get deployment info
-            deployment = await session.get(ModelDeployment, deployment_id)
-            if not deployment:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail=f"Deployment {deployment_id} not found"
-                )
-            
-            if deployment.status != DeploymentStatus.ACTIVE:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Deployment {deployment_id} is not active"
-                )
-            
-            # Get request data
-            try:
-                request_data = await request.json()
-            except Exception as e:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Invalid JSON data: {str(e)}"
-                )
-            
-            # Validate data against schema if available
-            validation_result = None
-            validated_data = request_data
-            
-            # Check if request data has schema-formatted input (direct field values)
-            # vs traditional format with "data" wrapper
-            input_schema, _ = await schema_service.get_model_schemas(deployment.model_id)
-            
-            if input_schema and "data" not in request_data:
-                # Direct schema-based input - validate it
-                is_valid, validation_message, validated_fields = await schema_service.validate_prediction_data(
-                    deployment.model_id, request_data
-                )
-                
-                if not is_valid:
-                    raise HTTPException(
-                        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                        detail=f"Input validation failed: {validation_message}"
-                    )
-                
-                # Convert schema-validated data to model-expected format
-                validated_data = {"data": validated_fields}
-                validation_result = {
-                    "validation_performed": True,
-                    "validation_message": validation_message,
-                    "schema_applied": True
-                }
-            elif input_schema and "data" in request_data:
-                # Traditional format but schema exists - validate the inner data
-                if isinstance(request_data["data"], dict):
-                    is_valid, validation_message, validated_fields = await schema_service.validate_prediction_data(
-                        deployment.model_id, request_data["data"]
-                    )
-                    
-                    if not is_valid:
-                        raise HTTPException(
-                            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                            detail=f"Input validation failed: {validation_message}"
-                        )
-                    
-                    validated_data = {"data": validated_fields}
-                    validation_result = {
-                        "validation_performed": True,
-                        "validation_message": validation_message,
-                        "schema_applied": True
-                    }
-                else:
-                    validation_result = {
-                        "validation_performed": False,
-                        "validation_message": "Array input cannot be validated against field schema",
-                        "schema_applied": False
-                    }
-            else:
-                validation_result = {
-                    "validation_performed": False,
-                    "validation_message": "No schema defined for this model",
-                    "schema_applied": False
-                }
-            
-            # Make prediction call to the deployed service
-            prediction_result = await _make_prediction_call(
-                deployment, validated_data
+        # Get deployment info
+        deployment = await session.get(ModelDeployment, deployment_id)
+        if not deployment:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Deployment {deployment_id} not found"
+            )
+        
+        if deployment.status != DeploymentStatus.ACTIVE:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Deployment {deployment_id} is not active"
+            )
+        
+        # Get request data
+        try:
+            request_data = await request.json()
+        except Exception as e:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid JSON data: {str(e)}"
+            )
+        
+        # Validate data against schema if available
+        validation_result = None
+        validated_data = request_data
+        
+        # Check if request data has schema-formatted input (direct field values)
+        # vs traditional format with "data" wrapper
+        input_schema, _ = await schema_service.get_model_schemas(deployment.model_id)
+        
+        if input_schema and "data" not in request_data:
+            # Direct schema-based input - validate it
+            is_valid, validation_message, validated_fields = await schema_service.validate_prediction_data(
+                deployment.model_id, request_data
             )
             
-            # Add validation info to response
-            prediction_result["validation"] = validation_result
-            
-            # Log the prediction
-            await _log_prediction(session, deployment_id, request_data, prediction_result)
-            
-            return prediction_result
-            
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error in prediction endpoint for deployment {deployment_id}: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Prediction failed: {str(e)}"
-        )
-
-
-@router.post("/predict/{deployment_id}/batch")
-async def predict_batch(deployment_id: str, request: Request):
-    """
-    Batch prediction endpoint for deployed models with schema validation
-    
-    Handles multiple predictions in a single request for better efficiency.
-    Validates each item in the batch against the model's schema if defined.
-    
-    Example request:
-    ```
-    {
-        "data": [
-            {"square_feet": 2000, "bedrooms": 3, "bathrooms": 2, "age": 10},
-            {"square_feet": 1500, "bedrooms": 2, "bathrooms": 1, "age": 15}
-        ]
-    }
-    ```
-    """
-    try:
-        async with get_session() as session:
-            # Get deployment info
-            deployment = await session.get(ModelDeployment, deployment_id)
-            if not deployment:
+            if not is_valid:
                 raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail=f"Deployment {deployment_id} not found"
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail=f"Input validation failed: {validation_message}"
                 )
             
-            if deployment.status != DeploymentStatus.ACTIVE:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Deployment {deployment_id} is not active"
-                )
-            
-            # Get request data
-            try:
-                request_data = await request.json()
-            except Exception as e:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Invalid JSON data: {str(e)}"
-                )
-            
-            # Validate batch data format
-            if "data" not in request_data or not isinstance(request_data["data"], list):
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Batch data must be provided as a list under 'data' key"
-                )
-            
-            # Validate each item in batch against schema if available
-            validation_results = []
-            validated_batch_data = []
-            
-            input_schema, _ = await schema_service.get_model_schemas(deployment.model_id)
-            
-            if input_schema:
-                for i, item in enumerate(request_data["data"]):
-                    if isinstance(item, dict):
-                        is_valid, validation_message, validated_fields = await schema_service.validate_prediction_data(
-                            deployment.model_id, item
-                        )
-                        
-                        if not is_valid:
-                            raise HTTPException(
-                                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                                detail=f"Validation failed for batch item {i}: {validation_message}"
-                            )
-                        
-                        validated_batch_data.append(validated_fields)
-                        validation_results.append({
-                            "item_index": i,
-                            "validation_performed": True,
-                            "validation_message": validation_message
-                        })
-                    else:
-                        validated_batch_data.append(item)
-                        validation_results.append({
-                            "item_index": i,
-                            "validation_performed": False,
-                            "validation_message": "Non-object items cannot be validated"
-                        })
-            else:
-                validated_batch_data = request_data["data"]
-                validation_results = [{
-                    "validation_performed": False,
-                    "validation_message": "No schema defined for this model"
-                }]
-            
-            # Make batch prediction call
-            batch_request = {"data": validated_batch_data}
-            prediction_result = await _make_batch_prediction_call(
-                deployment, batch_request
-            )
-            
-            # Add validation info to response
-            prediction_result["validation"] = {
-                "batch_validation_performed": bool(input_schema),
-                "item_validations": validation_results,
-                "total_items": len(validated_batch_data)
+            # Convert schema-validated data to model-expected format
+            validated_data = {"data": validated_fields}
+            validation_result = {
+                "validation_performed": True,
+                "validation_message": validation_message,
+                "schema_applied": True
             }
-            
-            # Log the batch prediction
-            await _log_prediction(session, deployment_id, request_data, prediction_result, is_batch=True)
-            
-            return prediction_result
-            
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error in batch prediction endpoint for deployment {deployment_id}: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Batch prediction failed: {str(e)}"
-        )
-
-
-@router.post("/predict/{deployment_id}/proba")
-async def predict_proba(deployment_id: str, request: Request):
-    """
-    Prediction probability endpoint for classification models with schema validation
-    
-    Returns class probabilities instead of just predictions.
-    Only available for classification models that support probability output.
-    Input data is validated against the model's schema if defined.
-    """
-    try:
-        async with get_session() as session:
-            # Get deployment info
-            deployment = await session.get(ModelDeployment, deployment_id)
-            if not deployment:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail=f"Deployment {deployment_id} not found"
-                )
-            
-            if deployment.status != DeploymentStatus.ACTIVE:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Deployment {deployment_id} is not active"
-                )
-            
-            # Check if predict_proba is supported
-            if 'predict_proba' not in deployment.endpoints:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Probability prediction not supported for this model"
-                )
-            
-            # Get request data
-            try:
-                request_data = await request.json()
-            except Exception as e:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Invalid JSON data: {str(e)}"
-                )
-            
-            # Validate data against schema (same logic as predict endpoint)
-            validation_result = None
-            validated_data = request_data
-            
-            input_schema, _ = await schema_service.get_model_schemas(deployment.model_id)
-            
-            if input_schema and "data" not in request_data:
-                # Direct schema-based input
-                is_valid, validation_message, validated_fields = await schema_service.validate_prediction_data(
-                    deployment.model_id, request_data
-                )
-                
-                if not is_valid:
-                    raise HTTPException(
-                        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                        detail=f"Input validation failed: {validation_message}"
-                    )
-                
-                validated_data = {"data": validated_fields}
-                validation_result = {
-                    "validation_performed": True,
-                    "validation_message": validation_message,
-                    "schema_applied": True
-                }
-            elif input_schema and "data" in request_data and isinstance(request_data["data"], dict):
-                # Traditional format with inner data validation
+        elif input_schema and "data" in request_data:
+            # Traditional format but schema exists - validate the inner data
+            if isinstance(request_data["data"], dict):
                 is_valid, validation_message, validated_fields = await schema_service.validate_prediction_data(
                     deployment.model_id, request_data["data"]
                 )
@@ -420,23 +189,268 @@ async def predict_proba(deployment_id: str, request: Request):
             else:
                 validation_result = {
                     "validation_performed": False,
-                    "validation_message": "No schema defined or array input",
+                    "validation_message": "Array input cannot be validated against field schema",
                     "schema_applied": False
                 }
+        else:
+            validation_result = {
+                "validation_performed": False,
+                "validation_message": "No schema defined for this model",
+                "schema_applied": False
+            }
+        
+        # Make prediction call to the deployed service
+        prediction_response = await _make_prediction_call(deployment, validated_data)
+        
+        # Log the prediction
+        await _log_prediction(session, deployment_id, request_data, prediction_response, False, "predict")
+        
+        # Return combined response
+        return {
+            **prediction_response,
+            "validation": validation_result
+        }
             
-            # Make probability prediction call
-            prediction_result = await _make_proba_prediction_call(
-                deployment, validated_data
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in prediction endpoint for deployment {deployment_id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Prediction failed: {str(e)}"
+        )
+
+
+@router.post("/predict/{deployment_id}/batch")
+async def predict_batch(deployment_id: str, request: Request, session: AsyncSession = Depends(get_async_session)):
+    """
+    Batch prediction endpoint for deployed models
+    
+    Accepts multiple samples for prediction in a single request.
+    
+    Example request:
+    ```
+    {
+        "data": [
+            {"feature1": 1.0, "feature2": 2.0},
+            {"feature1": 3.0, "feature2": 4.0},
+            {"feature1": 5.0, "feature2": 6.0}
+        ]
+    }
+    ```
+    
+    Returns predictions for all samples along with validation results.
+    """
+    try:
+        # Get deployment info
+        deployment = await session.get(ModelDeployment, deployment_id)
+        if not deployment:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Deployment {deployment_id} not found"
+            )
+        
+        if deployment.status != DeploymentStatus.ACTIVE:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Deployment {deployment_id} is not active"
+            )
+        
+        # Get request data
+        try:
+            request_data = await request.json()
+        except Exception as e:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid JSON data: {str(e)}"
+            )
+        
+        # Validate batch format
+        if "data" not in request_data or not isinstance(request_data["data"], list):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Batch data must be provided as a list under 'data' key"
+            )
+        
+        batch_data = request_data["data"]
+        if len(batch_data) == 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Batch data cannot be empty"
+            )
+        
+        # Validate each item against schema if available
+        validation_results = []
+        validated_batch_data = []
+        
+        input_schema, _ = await schema_service.get_model_schemas(deployment.model_id)
+        
+        for i, item in enumerate(batch_data):
+            if input_schema and isinstance(item, dict):
+                is_valid, validation_message, validated_fields = await schema_service.validate_prediction_data(
+                    deployment.model_id, item
+                )
+                
+                if not is_valid:
+                    raise HTTPException(
+                        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                        detail=f"Validation failed for batch item {i}: {validation_message}"
+                    )
+                
+                validated_batch_data.append(validated_fields)
+                validation_results.append({
+                    "item_index": i,
+                    "validation_performed": True,
+                    "validation_message": validation_message,
+                    "schema_applied": True
+                })
+            else:
+                validated_batch_data.append(item)
+                validation_results.append({
+                    "item_index": i,
+                    "validation_performed": False,
+                    "validation_message": "No schema defined or item not a dict",
+                    "schema_applied": False
+                })
+        
+        # Prepare validated request
+        validated_request = {"data": validated_batch_data}
+        
+        # Make batch prediction call
+        prediction_response = await _make_batch_prediction_call(deployment, validated_request)
+        
+        # Log the prediction
+        await _log_prediction(session, deployment_id, request_data, prediction_response, True, "predict_batch")
+        
+        # Return combined response
+        return {
+            **prediction_response,
+            "validation": {
+                "validation_performed": any(v["validation_performed"] for v in validation_results),
+                "schema_applied": any(v["schema_applied"] for v in validation_results),
+                "item_validations": validation_results
+            }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in batch prediction endpoint for deployment {deployment_id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Batch prediction failed: {str(e)}"
+        )
+
+
+@router.post("/predict/{deployment_id}/proba")
+async def predict_proba(deployment_id: str, request: Request, session: AsyncSession = Depends(get_async_session)):
+    """
+    Probability prediction endpoint for deployed models
+    
+    Returns class probabilities for classification models.
+    Only available for models that support probability prediction.
+    
+    Example request:
+    ```
+    {
+        "data": {"feature1": 1.0, "feature2": 2.0}
+    }
+    ```
+    
+    Returns probabilities for each class.
+    """
+    try:
+        # Get deployment info
+        deployment = await session.get(ModelDeployment, deployment_id)
+        if not deployment:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Deployment {deployment_id} not found"
+            )
+        
+        if deployment.status != DeploymentStatus.ACTIVE:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Deployment {deployment_id} is not active"
+            )
+        
+        # Check if model supports probability prediction
+        if "predict_proba" not in deployment.endpoints:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Probability prediction is not supported for this model"
+            )
+        
+        # Get request data
+        try:
+            request_data = await request.json()
+        except Exception as e:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid JSON data: {str(e)}"
+            )
+        
+        # Validate data against schema if available (same logic as predict)
+        validation_result = None
+        validated_data = request_data
+        
+        input_schema, _ = await schema_service.get_model_schemas(deployment.model_id)
+        
+        if input_schema and "data" not in request_data:
+            # Direct schema-based input
+            is_valid, validation_message, validated_fields = await schema_service.validate_prediction_data(
+                deployment.model_id, request_data
             )
             
-            # Add validation info to response
-            prediction_result["validation"] = validation_result
+            if not is_valid:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail=f"Input validation failed: {validation_message}"
+                )
             
-            # Log the prediction
-            await _log_prediction(session, deployment_id, request_data, prediction_result, endpoint="predict_proba")
+            validated_data = {"data": validated_fields}
+            validation_result = {
+                "validation_performed": True,
+                "validation_message": validation_message,
+                "schema_applied": True
+            }
+        elif input_schema and "data" in request_data and isinstance(request_data["data"], dict):
+            # Traditional format with dict data
+            is_valid, validation_message, validated_fields = await schema_service.validate_prediction_data(
+                deployment.model_id, request_data["data"]
+            )
             
-            return prediction_result
+            if not is_valid:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail=f"Input validation failed: {validation_message}"
+                )
             
+            validated_data = {"data": validated_fields}
+            validation_result = {
+                "validation_performed": True,
+                "validation_message": validation_message,
+                "schema_applied": True
+            }
+        else:
+            validation_result = {
+                "validation_performed": False,
+                "validation_message": "No schema defined for this model",
+                "schema_applied": False
+            }
+        
+        # Make prediction call
+        prediction_response = await _make_proba_prediction_call(deployment, validated_data)
+        
+        # Log the prediction
+        await _log_prediction(session, deployment_id, request_data, prediction_response, False, "predict_proba")
+        
+        # Return combined response
+        return {
+            **prediction_response,
+            "validation": validation_result
+        }
+        
     except HTTPException:
         raise
     except Exception as e:
@@ -448,41 +462,42 @@ async def predict_proba(deployment_id: str, request: Request):
 
 
 @router.get("/predict/{deployment_id}/schema")
-async def get_prediction_schema(deployment_id: str):
+async def get_prediction_schema(deployment_id: str, session: AsyncSession = Depends(get_async_session)):
     """
-    Get the input/output schema for a deployed model's prediction endpoint
+    Get prediction schema information for a deployed model
     
-    Returns the expected input format and output format for the model,
-    including field types, validation rules, and example data.
+    Returns the input and output schemas, example data, and validation information.
+    This helps users understand the expected format for prediction requests.
     """
     try:
-        async with get_session() as session:
-            # Get deployment info
-            deployment = await session.get(ModelDeployment, deployment_id)
-            if not deployment:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail=f"Deployment {deployment_id} not found"
-                )
-            
-            # Get model schemas
-            input_schema, output_schema = await schema_service.get_model_schemas(deployment.model_id)
-            
-            # Generate example data
-            example_data = await schema_service.get_model_example_data(deployment.model_id)
-            
-            return {
-                "deployment_id": deployment_id,
-                "model_id": deployment.model_id,
-                "framework": deployment.framework,
-                "endpoints": deployment.endpoints,
-                "input_schema": input_schema.dict() if input_schema else None,
-                "output_schema": output_schema.dict() if output_schema else None,
-                "example_input": example_data,
-                "validation_enabled": bool(input_schema),
-                "description": "Schema information for the deployed model prediction endpoint"
-            }
-            
+        # Get deployment info
+        deployment = await session.get(ModelDeployment, deployment_id)
+        if not deployment:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Deployment {deployment_id} not found"
+            )
+        
+        # Get model schemas
+        input_schema, output_schema = await schema_service.get_model_schemas(deployment.model_id)
+        
+        # Generate example data
+        example_data = await schema_service.get_model_example_data(deployment.model_id)
+        
+        return {
+            "deployment_id": deployment_id,
+            "model_id": deployment.model_id,
+            "framework": deployment.framework,
+            "endpoints": deployment.endpoints,
+            "input_schema": input_schema.dict() if input_schema else None,
+            "output_schema": output_schema.dict() if output_schema else None,
+            "example_input": example_data,
+            "validation_enabled": bool(input_schema),
+            "description": "Schema information for the deployed model prediction endpoint"
+        }
+        
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error getting prediction schema for deployment {deployment_id}: {e}")
         raise HTTPException(
@@ -648,18 +663,22 @@ async def _log_prediction(session, deployment_id: str, request_data: Dict[str, A
                          endpoint: str = "predict"):
     """Log prediction request and response"""
     try:
-        prediction_log = ModelPrediction(
-            id=str(datetime.utcnow().timestamp()),
-            deployment_id=deployment_id,
-            request_data=request_data,
-            response_data=response_data,
-            endpoint=endpoint,
-            is_batch=is_batch,
-            request_size=len(str(request_data)),
-            response_size=len(str(response_data)),
-            latency_ms=45.0,  # Mock latency
-            status="success",
-            created_at=datetime.utcnow()
+        # Get deployment to get model_id
+        deployment = await session.get(ModelDeployment, deployment_id)
+        if not deployment:
+            logger.warning(f"Deployment {deployment_id} not found for logging")
+            return
+        
+        prediction_log = PredictionLogDB(
+            id=str(uuid.uuid4()),
+            model_id=deployment.model_id,
+            input_data=request_data,
+            output_data=response_data,
+            latency_ms=45.0,  # Mock latency - should be calculated in real implementation
+            request_id=str(uuid.uuid4()),  # Generate a request ID
+            api_endpoint=endpoint,  # Use the endpoint parameter
+            success=True,  # Assume success for now
+            timestamp=datetime.utcnow()
         )
         
         session.add(prediction_log)

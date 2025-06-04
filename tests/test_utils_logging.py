@@ -209,7 +209,8 @@ class TestSetupLogging:
         # Check that JSON formatter is used for console
         console_handler = None
         for handler in root_logger.handlers:
-            if isinstance(handler, logging.StreamHandler) and handler.stream.name == '<stdout>':
+            if (isinstance(handler, logging.StreamHandler) and 
+                hasattr(handler, '_is_stdout') and handler._is_stdout):
                 console_handler = handler
                 break
         

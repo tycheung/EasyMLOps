@@ -130,6 +130,9 @@ Examples:
             print(f"❌ Test file not found: {test_file}")
             return 1
         cmd.append(test_file)
+    else:
+        # If no specific file is specified, run all tests in the tests directory
+        cmd.append("tests/")
     
     if args.function:
         if not args.file:
@@ -152,7 +155,7 @@ Examples:
     elif args.quiet:
         cmd.append("-q")
     
-    # Coverage options
+    # Coverage options - only add if not already specified in pytest.ini
     if args.no_cov:
         cmd.extend(["--no-cov"])
     elif args.coverage:

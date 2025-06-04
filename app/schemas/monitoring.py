@@ -19,8 +19,11 @@ class MetricType(str, Enum):
     CPU_USAGE = "cpu_usage"
     MEMORY_USAGE = "memory_usage"
     DISK_USAGE = "disk_usage"
+    DISK_USAGE_MODELS = "disk_usage_models"
     REQUEST_COUNT = "request_count"
     SUCCESS_RATE = "success_rate"
+    DB_CONNECTION_STATUS = "db_connection_status"
+    BENTOML_SERVICE_STATUS = "bentoml_service_status"
 
 
 class AlertSeverity(str, Enum):
@@ -38,6 +41,15 @@ class SystemComponent(str, Enum):
     MODEL_SERVICE = "model_service"
     BENTOML = "bentoml"
     STORAGE = "storage"
+    SYSTEM = "system"
+
+
+class SystemStatus(str, Enum):
+    """Overall system or component status"""
+    OPERATIONAL = "operational"
+    UNHEALTHY = "unhealthy"
+    DEGRADED = "degraded"
+    MAINTENANCE = "maintenance"
 
 
 # Model Performance Monitoring Schemas
@@ -122,22 +134,26 @@ class ModelPerformanceMetrics(BaseModel):
 
 # System Health Monitoring Schemas
 class SystemHealthMetric(BaseModel):
-    """Schema for system health metrics"""
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()), description="Unique metric ID")
+    """Schema for individual system component health metrics or status"""
     component: SystemComponent = Field(..., description="System component")
-    metric_type: MetricType = Field(..., description="Type of metric")
-    value: float = Field(..., description="Metric value")
-    unit: str = Field(..., description="Unit of measurement")
-    timestamp: datetime = Field(default_factory=datetime.utcnow, description="Measurement timestamp")
+    status: SystemStatus = Field(..., description="Status of the component")
+    message: str = Field(..., description="Health message or details")
     
-    # Additional context
+    # Optional fields for specific metrics if this schema is also used for that
+    metric_type: Optional[MetricType] = Field(None, description="Type of metric, if applicable")
+    value: Optional[float] = Field(None, description="Metric value, if applicable")
+    unit: Optional[str] = Field(None, description="Unit of measurement, if applicable")
+    
+    timestamp: datetime = Field(default_factory=datetime.utcnow, description="Measurement timestamp")
     host: Optional[str] = Field(None, description="Host/server name")
     tags: Dict[str, str] = Field(default_factory=dict, description="Additional metric tags")
-    
+
     model_config = {
         "json_schema_extra": {
             "example": {
                 "component": "api_server",
+                "status": "operational",
+                "message": "API server is responsive.",
                 "metric_type": "cpu_usage",
                 "value": 45.5,
                 "unit": "percent",
@@ -150,21 +166,18 @@ class SystemHealthMetric(BaseModel):
 
 class SystemHealthStatus(BaseModel):
     """Schema for overall system health status"""
-    overall_status: str = Field(..., description="Overall system status")
-    components: Dict[str, Dict[str, Any]] = Field(..., description="Component-specific health data")
+    overall_status: SystemStatus = Field(..., description="Overall system status")
+    components: List[SystemHealthMetric] = Field(..., description="Status of individual components")
     last_check: datetime = Field(default_factory=datetime.utcnow, description="Last health check timestamp")
-    uptime_seconds: float = Field(..., description="System uptime in seconds")
-    
+
     model_config = {
         "json_schema_extra": {
             "example": {
-                "overall_status": "healthy",
-                "components": {
-                    "api_server": {"status": "healthy", "cpu": 45.5, "memory": 62.3},
-                    "database": {"status": "healthy", "connections": 12, "response_time": 5.2},
-                    "model_services": {"status": "healthy", "active_models": 8, "avg_latency": 45.2}
-                },
-                "uptime_seconds": 3600.0
+                "overall_status": "operational",
+                "components": [
+                    {"component": "api_server", "status": "operational", "message": "API server is responsive."},
+                    {"component": "database", "status": "unhealthy", "message": "Database connection failed."}
+                ]
             }
         }
     }
