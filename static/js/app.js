@@ -125,12 +125,12 @@ async function apiCall(endpoint, options = {}) {
 async function loadDashboardData() {
     try {
         // Load models
-        const models = await apiCall('/models');
+        const models = await apiCall('/models/');
         currentModels = models;
         document.getElementById('total-models').textContent = models.length;
         
         // Load deployments
-        const deployments = await apiCall('/deployments');
+        const deployments = await apiCall('/deployments/');
         currentDeployments = deployments;
         const activeDeployments = deployments.filter(d => d.status === 'active').length;
         document.getElementById('active-deployments').textContent = activeDeployments;
@@ -937,7 +937,7 @@ function collectSchemaFields(containerId) {
 // Models Management
 async function loadModels() {
     try {
-        const models = await apiCall('/models');
+        const models = await apiCall('/models/');
         currentModels = models;
         renderModelsList(models);
     } catch (error) {
@@ -1001,7 +1001,7 @@ function getStatusBadgeClass(status) {
 
 async function deployModel(modelId) {
     try {
-        const deployment = await apiCall(`/deployments`, {
+        const deployment = await apiCall(`/deployments/`, {
             method: 'POST',
             body: JSON.stringify({
                 model_id: modelId,
@@ -1038,7 +1038,7 @@ async function deleteModel(modelId) {
 // Deployments Management
 async function loadDeployments() {
     try {
-        const deployments = await apiCall('/deployments');
+        const deployments = await apiCall('/deployments/');
         currentDeployments = deployments;
         renderDeploymentsList(deployments);
     } catch (error) {
@@ -1114,7 +1114,7 @@ function testDeployment(deploymentId) {
 // Model Testing
 async function loadTestModels() {
     try {
-        const deployments = await apiCall('/deployments');
+        const deployments = await apiCall('/deployments/');
         const activeDeployments = deployments.filter(d => d.status === 'active');
         
         const testSelect = document.getElementById('test-model-select');
