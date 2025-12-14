@@ -17,12 +17,22 @@ A comprehensive ML Operations platform that empowers data scientists to deploy m
 - **Format Conversion**: Convert between JSON Schema, OpenAPI, and other formats
 - **Template Library**: Pre-built schema templates for common ML use cases
 
-### 📊 **Enterprise-Grade Monitoring**
-- **Real-time Performance Metrics**: Latency, throughput, success rates, and error tracking
-- **System Health Monitoring**: API server, database, storage, and service health checks
-- **Prediction Logging**: Comprehensive audit trail of all predictions with metadata
-- **Alert Management**: Configurable alerts with severity levels and automated notifications
-- **Analytics Dashboard**: Usage patterns, performance trends, and model analytics
+### 📊 **Enterprise-Grade Monitoring & MLOps**
+- **Real-time Performance Metrics**: Latency, throughput, success rates, and error tracking with percentile analysis
+- **System Health Monitoring**: API server, database, storage, and service health checks with resource usage tracking
+- **Prediction Logging**: Comprehensive audit trail of all predictions with metadata and ground truth tracking
+- **Alert Management**: Configurable alert rules with severity levels, escalation policies, and automated notifications
+- **Model Drift Detection**: Feature drift, data drift, and prediction drift detection using PSI and KS tests
+- **Performance Degradation**: Automatic detection of model performance degradation with statistical significance testing
+- **A/B Testing**: Built-in A/B testing framework with variant assignment, metrics tracking, and statistical analysis
+- **Canary Deployments**: Gradual rollout with health checks, automatic rollback, and traffic splitting
+- **Model Versioning**: Compare model versions with performance regression detection
+- **Bias & Fairness**: Monitor protected attributes, calculate fairness metrics, and track demographic distributions
+- **Model Explainability**: SHAP and LIME explanations with feature importance analysis
+- **Data Quality**: Outlier detection, anomaly detection, and data quality metrics
+- **Model Lifecycle**: Retraining triggers, job management, and model card generation
+- **Governance**: Data lineage tracking, compliance records, and retention policies
+- **Analytics Dashboard**: Usage patterns, performance trends, and comprehensive model analytics
 
 ### 💻 **Modern Web Interface**
 - **Intuitive Dashboard**: Beautiful, responsive web UI for model management
@@ -39,9 +49,10 @@ A comprehensive ML Operations platform that empowers data scientists to deploy m
 - **Error Handling**: Global exception handling with structured error responses
 
 ### 🧪 **Comprehensive Testing**
-- **100% Test Coverage**: Extensive test suite with 363+ passing tests
+- **Extensive Test Suite**: 623+ tests covering all functionality
 - **Multiple Test Types**: Unit, integration, API, service, and monitoring tests
-- **Test Categories**: Organized by functionality (models, deployments, schemas, monitoring)
+- **Test Categories**: Organized by functionality (models, deployments, schemas, monitoring, A/B testing, canary, drift, etc.)
+- **Modular Architecture**: Refactored codebase with all files under 500 lines for maintainability
 - **CI/CD Ready**: Automated testing with coverage reporting
 - **Cross-Platform**: Windows, Linux, macOS compatibility
 
@@ -320,30 +331,66 @@ easymlops/
 │   ├── main.py             # FastAPI application entry point
 │   ├── config.py           # Configuration management
 │   ├── database.py         # Database connection and session management
+│   ├── core/               # Core application factory and routing
+│   │   ├── app_factory.py  # Application factory pattern
+│   │   └── routes.py       # Route registration
 │   ├── models/             # SQLModel database models
 │   │   ├── model.py        # Model and deployment models
-│   │   └── monitoring.py   # Monitoring and logging models
+│   │   └── monitoring/     # Modular monitoring models
+│   │       ├── base.py     # Base models and enums
+│   │       ├── performance.py
+│   │       ├── drift.py
+│   │       ├── testing.py
+│   │       └── ...         # Domain-specific model modules
 │   ├── routes/             # FastAPI route definitions
 │   │   ├── models.py       # Model CRUD operations
 │   │   ├── deployments.py  # Deployment management
-│   │   ├── dynamic.py      # Dynamic prediction endpoints
+│   │   ├── dynamic/        # Dynamic prediction endpoints (refactored)
+│   │   │   ├── prediction_handlers.py
+│   │   │   ├── schema_handler.py
+│   │   │   └── ...
 │   │   ├── schemas.py      # Schema management
 │   │   └── monitoring.py   # Monitoring and metrics
 │   ├── services/           # Business logic services
-│   │   ├── bentoml_service.py     # BentoML integration
-│   │   ├── deployment_service.py  # Deployment management
-│   │   ├── schema_service.py      # Schema operations
-│   │   └── monitoring_service.py  # Monitoring and analytics
+│   │   ├── bentoml/        # BentoML integration (refactored)
+│   │   │   ├── builders/   # Framework-specific builders
+│   │   │   └── ...
+│   │   ├── monitoring/     # Monitoring services (refactored)
+│   │   │   ├── performance/    # Performance monitoring modules
+│   │   │   ├── drift/          # Drift detection modules
+│   │   │   ├── degradation/    # Performance degradation modules
+│   │   │   ├── ab_testing.py   # A/B testing service
+│   │   │   ├── canary.py        # Canary deployment service
+│   │   │   ├── fairness.py      # Bias & fairness monitoring
+│   │   │   ├── explainability.py
+│   │   │   └── ...              # 21 domain-specific services
+│   │   ├── schema/         # Schema services (refactored)
+│   │   │   ├── service.py
+│   │   │   ├── validation.py
+│   │   │   └── ...
+│   │   ├── deployment_service.py
+│   │   └── monitoring_service.py  # Facade pattern
 │   ├── schemas/            # Pydantic schemas
 │   │   ├── model.py        # Model and deployment schemas
-│   │   └── monitoring.py   # Monitoring schemas
+│   │   └── monitoring/     # Modular monitoring schemas
+│   │       ├── base.py
+│   │       ├── alerts.py
+│   │       └── ...         # Domain-specific schema modules
 │   └── utils/              # Utility functions
-├── tests/                  # Comprehensive test suite (363+ tests)
-│   ├── test_models.py      # Model management tests
-│   ├── test_deployments.py # Deployment tests
-│   ├── test_schemas.py     # Schema management tests
-│   ├── test_monitoring.py  # Monitoring tests
-│   └── test_services_comprehensive.py  # Service layer tests
+│       └── model_utils/    # Model utilities (refactored)
+│           └── frameworks/ # Framework-specific detectors
+│               ├── detector.py
+│               ├── sklearn_detector.py
+│               └── ...
+├── tests/                  # Comprehensive test suite (623+ tests)
+│   ├── test_services/      # Service layer tests (refactored)
+│   │   ├── test_monitoring_performance.py
+│   │   ├── test_monitoring_drift.py
+│   │   ├── test_monitoring_ab_testing.py
+│   │   └── ...             # Domain-specific test modules
+│   ├── test_routes/        # API route tests
+│   ├── test_utils/         # Utility tests
+│   └── ...                 # Additional test modules
 ├── static/                 # Web interface files
 │   ├── index.html          # Main web interface
 │   ├── css/                # Stylesheets
@@ -361,7 +408,7 @@ easymlops/
 
 ### **Advanced Test Runner**
 ```bash
-# Run all tests (363+ tests)
+# Run all tests (623+ tests)
 python run_tests.py
 
 # Run specific test categories
@@ -371,12 +418,15 @@ python run_tests.py --database      # Database tests only
 python run_tests.py --monitoring    # Monitoring tests only
 python run_tests.py --deployment    # Deployment tests only
 python run_tests.py --service       # Service layer tests only
+python run_tests.py --integration   # Integration tests only
+python run_tests.py --config        # Configuration tests only
 
 # Run with coverage
 python run_tests.py --coverage
 
 # Run specific test file
 python run_tests.py --file models   # runs test_models.py
+python run_tests.py --file monitoring_performance  # runs test_monitoring_performance.py
 
 # Fast test suite (skip slow tests)
 python run_tests.py --fast
@@ -386,6 +436,11 @@ python run_tests.py --parallel 4
 
 # Stop on first failure
 python run_tests.py --failfast
+
+# Special commands
+python run_tests.py quick           # Quick test suite
+python run_tests.py ci              # CI/CD test suite
+python run_tests.py check           # Check test environment setup
 ```
 
 ### **Development Commands**
@@ -464,12 +519,25 @@ kubectl scale deployment easymlops --replicas=3
 
 ### **Comprehensive Monitoring Features**
 
-- **📈 Performance Metrics**: Request latency, throughput, error rates with percentile tracking
-- **🏥 System Health**: Real-time health checks for all system components
-- **📝 Prediction Logging**: Complete audit trail with request/response logging
-- **🚨 Alert Management**: Configurable alerts with severity levels and notifications
-- **📊 Analytics Dashboard**: Usage patterns, performance trends, and model insights
+The platform includes 21 specialized monitoring services organized in a modular architecture:
+
+- **📈 Performance Monitoring**: Request latency, throughput, error rates with percentile tracking (p50, p95, p99)
+- **🏥 System Health**: Real-time health checks for all system components with resource usage tracking
+- **📝 Prediction Logging**: Complete audit trail with request/response logging and ground truth tracking
+- **🚨 Alert Management**: Configurable alert rules with severity levels, escalation policies, and notifications
+- **📊 Analytics Dashboard**: Usage patterns, performance trends, and comprehensive model insights
 - **🔍 Error Tracking**: Structured error logging with contextual information
+- **🌊 Drift Detection**: Feature drift, data drift, and prediction drift using PSI and KS tests
+- **📉 Performance Degradation**: Automatic detection with statistical significance testing
+- **🧪 A/B Testing**: Built-in framework with variant assignment and statistical analysis
+- **🦅 Canary Deployments**: Gradual rollout with automatic rollback capabilities
+- **⚖️ Bias & Fairness**: Protected attribute monitoring and fairness metrics
+- **🔬 Model Explainability**: SHAP and LIME explanations with feature importance
+- **✅ Data Quality**: Outlier detection, anomaly detection, and quality metrics
+- **🔄 Model Lifecycle**: Retraining triggers, job management, and model cards
+- **📋 Governance**: Data lineage, compliance records, and retention policies
+- **🔗 Integration**: Webhooks, external integrations, and sampling configurations
+- **📜 Audit Logging**: Comprehensive audit trail for compliance
 
 ### **Monitoring Endpoints**
 ```bash
@@ -479,11 +547,20 @@ GET /api/v1/monitoring/health
 # Model performance metrics
 GET /api/v1/monitoring/models/{model_id}/performance
 
+# Drift detection
+GET /api/v1/monitoring/models/{model_id}/drift
+
+# A/B test metrics
+GET /api/v1/monitoring/ab-tests/{test_id}/metrics
+
+# Canary deployment status
+GET /api/v1/monitoring/canary/{deployment_id}/status
+
 # Active alerts
 GET /api/v1/monitoring/alerts
 
-# Deployment metrics
-GET /api/v1/deployments/{deployment_id}/metrics
+# Dashboard metrics
+GET /api/v1/monitoring/dashboard
 ```
 
 ### **Health Check Endpoints**
@@ -556,15 +633,25 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 ## 🗺️ Roadmap
 
+### **Completed Features** ✅
+- **🔄 Model Versioning**: Complete model lifecycle management with version comparison
+- **🧪 A/B Testing**: Built-in A/B testing framework with statistical analysis
+- **🦅 Canary Deployments**: Gradual rollout with automatic rollback
+- **🌊 Drift Detection**: Feature, data, and prediction drift detection
+- **📉 Performance Degradation**: Automatic detection with statistical testing
+- **⚖️ Bias & Fairness**: Protected attribute monitoring and fairness metrics
+- **🔬 Model Explainability**: SHAP and LIME explanations
+- **✅ Data Quality**: Outlier and anomaly detection
+- **📋 Governance**: Data lineage and compliance tracking
+- **📊 Advanced Dashboards**: Comprehensive monitoring dashboards
+
 ### **Planned Features**
-- **🔄 Model Versioning**: Complete model lifecycle management with rollback capabilities
-- **🧪 A/B Testing**: Canary deployments and traffic splitting
-- **📊 Advanced Dashboards**: Custom monitoring dashboards with visualization
 - **☁️ Multi-Cloud**: Support for AWS, GCP, Azure deployments
 - **👥 Multi-User**: Authentication, authorization, and role-based access control
-- **🔄 Auto-Retraining**: Automated model retraining workflows
-- **📈 Advanced Analytics**: Real-time model drift detection and performance analytics
-- **🔗 Integration Hub**: Connectors for popular ML platforms and tools
+- **🔄 Auto-Retraining**: Enhanced automated model retraining workflows
+- **🔗 Integration Hub**: Additional connectors for popular ML platforms and tools
+- **📱 Mobile App**: Native mobile application for monitoring
+- **🌐 Multi-Region**: Support for multi-region deployments
 
 ### **Performance Goals**
 - **⚡ Sub-100ms**: Prediction latency optimization

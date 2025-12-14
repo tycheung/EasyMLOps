@@ -47,12 +47,17 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python run_tests.py                    # Run all tests
+  python run_tests.py                    # Run all tests (623+ tests)
   python run_tests.py --unit             # Run only unit tests
   python run_tests.py --api              # Run only API tests
+  python run_tests.py --monitoring       # Run monitoring tests only
   python run_tests.py --coverage         # Run with detailed coverage
   python run_tests.py --fast             # Run fast tests only
   python run_tests.py --file test_config # Run specific test file
+  python run_tests.py --file monitoring_performance  # Run specific test module
+  python run_tests.py quick              # Quick test suite
+  python run_tests.py ci                 # CI/CD test suite
+  python run_tests.py check              # Check test environment
         """
     )
     
@@ -229,8 +234,8 @@ def check_test_setup():
         return False
     print("✅ tests directory found")
     
-    # Check for test files
-    test_files = list(Path("tests").glob("test_*.py"))
+    # Check for test files (including subdirectories)
+    test_files = list(Path("tests").rglob("test_*.py"))
     print(f"✅ Found {len(test_files)} test files")
     
     # Check conftest.py
