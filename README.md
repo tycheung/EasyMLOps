@@ -583,8 +583,7 @@ GET /api/v1/monitoring/dashboard
 2. **Create a feature branch** (`git checkout -b feature/amazing-feature`)
 3. **Make your changes** with comprehensive tests
 4. **Run the test suite** (`python run_tests.py`)
-5. **Ensure 100% test coverage** (`python run_tests.py --coverage`)
-6. **Submit a pull request**
+5. **Submit a pull request**
 
 ### **Development Guidelines**
 - Follow the existing code style and patterns
