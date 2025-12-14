@@ -344,7 +344,7 @@ class TestModelPerformanceMetric:
             p50_latency_ms=140.0,
             p95_latency_ms=200.0,
             p99_latency_ms=250.0,
-            max_latency_ms=300.0,
+            min_latency_ms=100.0,
             success_rate=0.95,
             error_rate=0.05
         )
@@ -604,7 +604,7 @@ class TestModelIntegration:
                 p50_latency_ms=140.0,
                 p95_latency_ms=200.0,
                 p99_latency_ms=250.0,
-                max_latency_ms=300.0,
+                min_latency_ms=100.0,
                 success_rate=value,  # Use the metric value as success rate for testing
                 error_rate=0.05
             )

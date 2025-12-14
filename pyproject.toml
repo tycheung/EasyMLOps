@@ -40,6 +40,8 @@ asyncpg = "^0.30.0"
 psutil = ">=6.1.1,<7.0.0"
 pytest = "^8.4.0"
 jsonschema = "^4.24.0"
+aiosqlite = "^0.21.0"
+scipy = "^1.16.3"
 
 [tool.poetry.group.dev.dependencies]
 pytest-cov = "^6.1.1"

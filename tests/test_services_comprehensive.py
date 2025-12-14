@@ -8,6 +8,7 @@ import asyncio
 import tempfile
 import os
 import json
+import uuid
 from unittest.mock import patch, MagicMock, AsyncMock, mock_open
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -18,7 +19,7 @@ from app.services.schema_service import schema_service, SchemaService
 from app.services.bentoml_service import bentoml_service_manager
 from app.models.model import Model, ModelDeployment
 from app.schemas.model import ModelDeploymentCreate, ModelStatus, DeploymentStatus, ModelFramework, ModelType
-from app.schemas.monitoring import AlertSeverity, SystemComponent, ModelPerformanceMetrics
+from app.schemas.monitoring import AlertSeverity, SystemComponent, ModelPerformanceMetrics, MetricType, DriftType, DriftSeverity, ModelPerformanceHistory, ModelConfidenceMetrics, ModelBaseline, ModelVersionComparison, ABTest, ABTestStatus, ABTestMetrics, ABTestComparison, CanaryDeployment, CanaryDeploymentStatus, CanaryMetrics, ProtectedAttributeConfig, ProtectedAttributeType, BiasFairnessMetrics, DemographicDistribution, ModelExplanation, ExplanationType, FeatureImportance, ImportanceType, OutlierDetection, OutlierDetectionMethod, OutlierType, AnomalyDetection, AnomalyType, DataQualityMetrics, RetrainingJob, RetrainingTriggerType, RetrainingJobStatus, RetrainingTriggerConfig, ModelCard, DataLineage, LineageType, RelationshipType, GovernanceWorkflow, WorkflowType, WorkflowStatus, ComplianceRecord, ComplianceType, ComplianceRecordType, ComplianceRecordStatus, DataRetentionPolicy, TimeSeriesAnalysis, AnalysisType, TrendDirection, ComparativeAnalytics, ComparisonType, CustomDashboard, AutomatedReport, ReportType, ScheduleType, ExternalIntegration, IntegrationType, WebhookConfig, SamplingConfig, SamplingStrategy, MetricAggregationConfig, AggregationMethod, AlertRule, AlertCondition, NotificationChannel, NotificationChannelType, AlertGroup, AlertEscalation, EscalationTriggerCondition, Alert
 from app.database import get_session
 
 
@@ -210,128 +211,25 @@ class TestDeploymentService:
         assert status['service_status'] == mock_service_status
 
 
-class TestMonitoringService:
-    """Test monitoring service comprehensive functionality"""
-    
-    @pytest.mark.asyncio
-    async def test_log_prediction_success(self, test_model):
-        """Test successful prediction logging"""
-        input_data = {"feature1": 0.5, "feature2": "test"}
-        output_data = {"prediction": 0.75, "confidence": 0.85}
-        latency_ms = 45.2
-        
-        # The actual log_prediction method returns a UUID string
-        result = await monitoring_service.log_prediction(
-            model_id=test_model.id,
-            deployment_id="deploy_123",
-            input_data=input_data,
-            output_data=output_data,
-            latency_ms=latency_ms,
-            api_endpoint="/predict/deploy_123",
-            success=True
-        )
-        
-        # log_prediction returns a string ID (UUID)
-        assert isinstance(result, str)
-        # Just check that it's a valid UUID format (36 characters with hyphens)
-        assert len(result) == 36
-        assert result.count('-') == 4
-    
-    @pytest.mark.asyncio
-    async def test_get_system_health(self):
-        """Test system health monitoring"""
-        # Mock system metrics
-        with patch('psutil.cpu_percent') as mock_cpu, \
-             patch('psutil.virtual_memory') as mock_memory, \
-             patch('psutil.disk_usage') as mock_disk:
-            
-            mock_cpu.return_value = 45.2
-            mock_memory.return_value.percent = 68.5
-            mock_disk.return_value.percent = 78.3
-            
-            health = await monitoring_service.get_system_health()
-            
-            assert health is not None
-            assert 'cpu_usage' in health
-            assert 'memory_usage' in health
-            assert 'disk_usage' in health
-            assert 'status' in health
-            assert health['cpu_usage'] == 45.2
-    
-    @pytest.mark.asyncio
-    async def test_get_model_performance_metrics(self, test_model):
-        """Test performance metrics calculation"""
-        start_time = datetime.now(timezone.utc) - timedelta(hours=1)
-        end_time = datetime.now(timezone.utc)
-        
-        # Mock some prediction logs
-        with patch.object(monitoring_service, 'get_model_performance_metrics') as mock_metrics:
-            # Return a proper ModelPerformanceMetrics object
-            from app.schemas.monitoring import ModelPerformanceMetrics
-            mock_metrics.return_value = ModelPerformanceMetrics(
-                model_id=test_model.id,
-                time_window_start=start_time,
-                time_window_end=end_time,
-                total_requests=150,
-                successful_requests=145,
-                failed_requests=5,
-                requests_per_minute=2.5,
-                avg_latency_ms=45.2,
-                p50_latency_ms=42.1,
-                p95_latency_ms=78.5,
-                p99_latency_ms=95.2,
-                max_latency_ms=120.5,
-                success_rate=96.7,
-                error_rate=3.3
-            )
-            
-            metrics = await monitoring_service.get_model_performance_metrics(
-                model_id=test_model.id,
-                start_time=start_time,
-                end_time=end_time
-            )
-            
-            # Test object attributes instead of dict keys
-            assert metrics.total_requests == 150
-            assert metrics.avg_latency_ms == 45.2
-            assert metrics.success_rate == 96.7
-    
-    @pytest.mark.asyncio
-    async def test_create_alert(self, test_model):
-        """Test alert creation"""
-        alert_payload = {
-            'severity': AlertSeverity.WARNING,
-            'component': SystemComponent.MODEL_SERVICE,
-            'title': f'High Error Rate for Model {test_model.id}',
-            'description': 'Model error rate above threshold',
-            'metric_value': 7.5,
-            'threshold_value': 5.0,
-            'affected_models': [test_model.id]
-        }
-        
-        created_alert = await monitoring_service.create_alert(**alert_payload)
-            
-        assert created_alert is not None
-        assert created_alert.id is not None
-        assert created_alert.severity == AlertSeverity.WARNING
-        assert created_alert.component == SystemComponent.MODEL_SERVICE
-        assert created_alert.title == f'High Error Rate for Model {test_model.id}'
-        assert created_alert.description == 'Model error rate above threshold'
-        assert created_alert.metric_value == 7.5
-        assert created_alert.threshold_value == 5.0
-        assert created_alert.affected_models == [test_model.id]
-        assert created_alert.is_active is True
-    
-    @pytest.mark.asyncio
-    async def test_resolve_alert(self):
-        """Test alert resolution"""
-        with patch.object(monitoring_service, 'resolve_alert') as mock_resolve:
-            mock_resolve.return_value = True
-            
-            result = await monitoring_service.resolve_alert("alert_123")
-            
-            assert result is True
-            mock_resolve.assert_called_once_with("alert_123")
+# NOTE: TestMonitoringService has been split into 15 domain-specific test files:
+# - tests/test_services/test_monitoring_performance.py
+# - tests/test_services/test_monitoring_health.py
+# - tests/test_services/test_monitoring_alerts.py
+# - tests/test_services/test_monitoring_drift.py
+# - tests/test_services/test_monitoring_degradation.py
+# - tests/test_services/test_monitoring_baseline.py
+# - tests/test_services/test_monitoring_ab_testing.py
+# - tests/test_services/test_monitoring_canary.py
+# - tests/test_services/test_monitoring_fairness.py
+# - tests/test_services/test_monitoring_explainability.py
+# - tests/test_services/test_monitoring_data_quality.py
+# - tests/test_services/test_monitoring_lifecycle.py
+# - tests/test_services/test_monitoring_governance.py
+# - tests/test_services/test_monitoring_analytics.py
+# - tests/test_services/test_monitoring_integration.py
+# 
+# All monitoring service tests have been moved to the test_services/ directory.
+# The original TestMonitoringService class has been removed from this file.
 
 
 class TestSchemaService:

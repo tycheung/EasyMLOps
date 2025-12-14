@@ -40,7 +40,16 @@ def sample_performance_metrics():
         "p50_latency_ms": 42.1,
         "p95_latency_ms": 78.5,
         "p99_latency_ms": 95.2,
+        "p99_9_latency_ms": 110.0,
+        "min_latency_ms": 20.0,
         "max_latency_ms": 120.5,
+        "std_dev_latency_ms": 15.3,
+        "latency_distribution": {
+            "bins": [20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120],
+            "counts": [10, 20, 30, 40, 25, 15, 5, 3, 1, 1],
+            "bin_width": 10.0,
+            "total_samples": 1500
+        },
         "success_rate": 99.0,
         "error_rate": 1.0
     }

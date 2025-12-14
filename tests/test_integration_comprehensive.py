@@ -19,11 +19,36 @@ from app.schemas.model import ModelType, ModelFramework, DeploymentStatus
 @pytest.fixture
 def sample_model_file():
     """Create a sample model file for testing"""
-    with tempfile.NamedTemporaryFile(suffix='.joblib', delete=False) as f:
-        f.write(b"dummy model content")
-        yield f.name
-        if os.path.exists(f.name):
-            os.unlink(f.name)
+    import tempfile
+    import time
+    
+    # Create temp file with explicit close to avoid Windows file locking
+    f = tempfile.NamedTemporaryFile(suffix='.joblib', delete=False)
+    temp_path = f.name
+    f.close()  # Close immediately to release file handle
+    
+    try:
+        with open(temp_path, 'wb') as f:
+            f.write(b"dummy model content")
+        yield temp_path
+    finally:
+        # Clean up with retry logic for Windows
+        if os.path.exists(temp_path):
+            max_retries = 3
+            for attempt in range(max_retries):
+                try:
+                    os.unlink(temp_path)
+                    break
+                except (PermissionError, OSError) as e:
+                    if attempt < max_retries - 1:
+                        time.sleep(0.1 * (attempt + 1))  # Exponential backoff
+                    else:
+                        # Last attempt - try to delete on Windows with a delay
+                        time.sleep(0.5)
+                        try:
+                            os.unlink(temp_path)
+                        except:
+                            pass  # Ignore final failure
 
 
 class TestCompleteMLWorkflow:
@@ -247,13 +272,17 @@ class TestEndpointIntegration:
     
     def test_routes_registration(self):
         """Test that routes are properly registered"""
-        from app.main import app
+        from app.core.app_factory import create_app
+        from app.config import get_settings
+        from app.utils.logging import get_logger
         
-        if app is not None:
-            # Check that app has routes attribute
-            assert hasattr(app, 'routes') or hasattr(app, 'router')
-        else:
-            pytest.skip("App is None - routes not available for testing")
+        settings = get_settings()
+        logger = get_logger(__name__)
+        app = create_app(settings, logger)
+        
+        # Check that app has routes attribute
+        assert hasattr(app, 'routes') or hasattr(app, 'router')
+        assert len(app.routes) > 0
     
     @patch('app.database.get_session')
     def test_api_error_handling(self, mock_get_session, client):
@@ -353,8 +382,14 @@ class TestPerformanceIntegration:
         
         # This is a basic test - in practice you'd use memory profiling tools
         # Test that imports don't cause memory leaks
-        from app.main import app
+        from app.core.app_factory import create_app
+        from app.config import get_settings
+        from app.utils.logging import get_logger
         from app.services import deployment_service, monitoring_service, schema_service
+        
+        settings = get_settings()
+        logger = get_logger(__name__)
+        app = create_app(settings, logger)
         
         # Force another garbage collection
         gc.collect()
@@ -421,11 +456,11 @@ class TestScalabilityIntegration:
         
         # Test that file operations clean up properly
         # For async, mock aios.remove and aios.path.exists, aios.path.isdir
-        with patch('app.utils.model_utils.aios.makedirs', new_callable=AsyncMock), \
-             patch('app.utils.model_utils.aiofiles.open', new_callable=AsyncMock), \
-             patch('app.utils.model_utils.aios.path.exists', new_callable=AsyncMock, return_value=True), \
-             patch('app.utils.model_utils.aios.path.isdir', new_callable=AsyncMock, return_value=False), \
-             patch('app.utils.model_utils.aios.remove', new_callable=AsyncMock) as mock_aios_remove:
+        with patch('app.utils.model_utils.loaders.aios.makedirs', new_callable=AsyncMock), \
+             patch('app.utils.model_utils.loaders.aiofiles.open', new_callable=AsyncMock), \
+             patch('app.utils.model_utils.loaders.aios.path.exists', new_callable=AsyncMock, return_value=True), \
+             patch('app.utils.model_utils.loaders.aios.path.isdir', new_callable=AsyncMock, return_value=False), \
+             patch('app.utils.model_utils.loaders.aios.remove', new_callable=AsyncMock) as mock_aios_remove:
             
             # Simulate file operations
             await ModelFileManager.delete_model_file_async("/fake/path/model.pkl")
