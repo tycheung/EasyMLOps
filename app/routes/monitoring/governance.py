@@ -19,10 +19,18 @@ async def create_data_lineage(lineage: DataLineage):
     """Create data lineage record"""
     try:
         lineage_id = await monitoring_service.create_data_lineage(
-            entity_type=lineage.entity_type,
-            entity_id=lineage.entity_id,
-            relationships=lineage.relationships,
-            metadata=lineage.metadata
+            entity_type=lineage.lineage_type.value if hasattr(lineage.lineage_type, 'value') else str(lineage.lineage_type),
+            entity_id=lineage.source_id,
+            relationships={
+                "source": {"id": lineage.source_id, "type": lineage.source_type},
+                "target": {"id": lineage.target_id, "type": lineage.target_type},
+                "relationship": lineage.relationship_type.value if hasattr(lineage.relationship_type, 'value') else str(lineage.relationship_type)
+            },
+            metadata={
+                "source_metadata": lineage.source_metadata,
+                "target_metadata": lineage.target_metadata,
+                "relationship_metadata": lineage.relationship_metadata
+            }
         )
         return {"id": lineage_id, "message": "Data lineage created successfully"}
     except Exception as e:
@@ -35,11 +43,16 @@ async def create_governance_workflow(workflow: GovernanceWorkflow):
     """Create governance workflow"""
     try:
         workflow_id = await monitoring_service.create_governance_workflow(
-            workflow_type=workflow.workflow_type,
-            workflow_name=workflow.workflow_name,
-            description=workflow.description,
-            steps=workflow.steps,
-            config=workflow.config
+            workflow_type=workflow.workflow_type.value if hasattr(workflow.workflow_type, 'value') else str(workflow.workflow_type),
+            workflow_name=f"{workflow.workflow_type.value if hasattr(workflow.workflow_type, 'value') else str(workflow.workflow_type)}_workflow",
+            description=f"Workflow for {workflow.resource_type}:{workflow.resource_id}",
+            steps={"steps": []},
+            config={
+                "resource_type": workflow.resource_type,
+                "resource_id": workflow.resource_id,
+                "request_data": workflow.request_data,
+                "policy_checks": workflow.policy_checks
+            }
         )
         return {"id": workflow_id, "message": "Governance workflow created successfully"}
     except Exception as e:
@@ -52,12 +65,17 @@ async def create_compliance_record(record: ComplianceRecord):
     """Create compliance record"""
     try:
         record_id = await monitoring_service.create_compliance_record(
-            compliance_type=record.compliance_type,
-            record_type=record.record_type,
-            entity_id=record.entity_id,
-            entity_type=record.entity_type,
+            compliance_type=record.compliance_type.value if hasattr(record.compliance_type, 'value') else str(record.compliance_type),
+            record_type=record.record_type.value if hasattr(record.record_type, 'value') else str(record.record_type),
+            entity_id=record.subject_id or "unknown",
+            entity_type=record.subject_type or "unknown",
             description=record.description,
-            metadata=record.metadata
+            metadata={
+                "request_id": record.request_id,
+                "requested_by": record.requested_by,
+                "data_scope": record.data_scope,
+                "additional_data": record.additional_data
+            }
         )
         return {"id": record_id, "message": "Compliance record created successfully"}
     except Exception as e:
