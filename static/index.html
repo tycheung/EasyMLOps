@@ -56,6 +56,7 @@
                         <a href="#" onclick="showTab('models')" class="text-white hover:text-gray-200 px-3 py-2 text-sm font-medium">My Models</a>
                         <a href="#" onclick="showTab('deployments')" class="text-white hover:text-gray-200 px-3 py-2 text-sm font-medium">Deployments</a>
                         <a href="#" onclick="showTab('test')" class="text-white hover:text-gray-200 px-3 py-2 text-sm font-medium">Test Models</a>
+                        <a href="#" onclick="showTab('monitoring')" class="text-white hover:text-gray-200 px-3 py-2 text-sm font-medium">Monitoring</a>
                     </div>
                 </div>
                 <div class="flex items-center">
@@ -413,6 +414,67 @@
                             <i class="fas fa-rocket text-4xl mb-4"></i>
                             <p>No deployments yet</p>
                             <p class="text-sm mt-2">Deploy a model to create API endpoints</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Monitoring Tab -->
+        <div id="monitoring" class="tab-content">
+            <div class="px-4 py-6 sm:px-0">
+                <div class="mb-8">
+                    <h2 class="text-3xl font-bold text-gray-900">Monitoring & Observability</h2>
+                    <p class="mt-2 text-gray-600">Monitor system health, alerts, performance, and model behavior</p>
+                </div>
+
+                <!-- System Health -->
+                <div class="bg-white shadow rounded-lg mb-6">
+                    <div class="px-6 py-4 border-b border-gray-200">
+                        <h3 class="text-lg font-medium text-gray-900">System Health</h3>
+                    </div>
+                    <div class="p-6">
+                        <div id="system-health-display">
+                            <div class="text-center py-4 text-gray-500">Loading system health...</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Active Alerts -->
+                <div class="bg-white shadow rounded-lg mb-6">
+                    <div class="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
+                        <h3 class="text-lg font-medium text-gray-900">Active Alerts</h3>
+                        <button onclick="loadAlerts(true)" class="text-sm text-blue-600 hover:text-blue-800">
+                            <i class="fas fa-sync mr-1"></i>Refresh
+                        </button>
+                    </div>
+                    <div class="p-6">
+                        <div id="alerts-display">
+                            <div class="text-center py-4 text-gray-500">Loading alerts...</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Performance Metrics -->
+                <div class="bg-white shadow rounded-lg mb-6">
+                    <div class="px-6 py-4 border-b border-gray-200">
+                        <h3 class="text-lg font-medium text-gray-900">Performance Metrics</h3>
+                    </div>
+                    <div class="p-6">
+                        <div id="performance-metrics-display">
+                            <div class="text-center py-4 text-gray-500">Select a model to view performance metrics</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Drift Detection -->
+                <div class="bg-white shadow rounded-lg mb-6">
+                    <div class="px-6 py-4 border-b border-gray-200">
+                        <h3 class="text-lg font-medium text-gray-900">Drift Detection</h3>
+                    </div>
+                    <div class="p-6">
+                        <div id="drift-display">
+                            <div class="text-center py-4 text-gray-500">Select a model to view drift detection</div>
                         </div>
                     </div>
                 </div>

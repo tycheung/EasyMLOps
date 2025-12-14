@@ -50,6 +50,9 @@ function showTab(tabName) {
             case 'test':
                 loadTestModels();
                 break;
+            case 'monitoring':
+                loadMonitoringData();
+                break;
         }
     }
 }
@@ -135,9 +138,17 @@ async function loadDashboardData() {
         const activeDeployments = deployments.filter(d => d.status === 'active').length;
         document.getElementById('active-deployments').textContent = activeDeployments;
         
-        // Mock metrics (would come from monitoring service)
-        document.getElementById('predictions-today').textContent = Math.floor(Math.random() * 1000);
-        document.getElementById('avg-response-time').textContent = `${Math.floor(Math.random() * 50 + 10)}ms`;
+        // Load real monitoring metrics
+        try {
+            const dashboardMetrics = await apiCall('/monitoring/dashboard');
+            document.getElementById('predictions-today').textContent = dashboardMetrics.total_predictions || 0;
+            document.getElementById('avg-response-time').textContent = `${Math.round(dashboardMetrics.avg_latency_ms || 0)}ms`;
+        } catch (error) {
+            console.warn('Could not load monitoring metrics, using defaults:', error);
+            // Fallback to defaults if monitoring service unavailable
+            document.getElementById('predictions-today').textContent = '0';
+            document.getElementById('avg-response-time').textContent = '0ms';
+        }
         
         // Update recent activity
         updateRecentActivity();
@@ -1369,4 +1380,308 @@ window.deployModel = deployModel;
 window.deleteModel = deleteModel;
 window.testDeployment = testDeployment;
 window.viewDeploymentLogs = viewDeploymentLogs;
-window.stopDeployment = stopDeployment; 
+window.stopDeployment = stopDeployment;
+
+// ============================================
+// MONITORING FUNCTIONS
+// ============================================
+
+// Monitoring State
+let currentMonitoringData = {
+    health: null,
+    alerts: [],
+    drift: [],
+    performance: {}
+};
+
+// Load Monitoring Data
+async function loadMonitoringData() {
+    try {
+        // Load system health
+        await loadSystemHealth();
+        
+        // Load active alerts
+        await loadAlerts();
+        
+        // Load recent drift detections
+        await loadRecentDrift();
+        
+        // Load performance metrics
+        await loadPerformanceMetrics();
+        
+    } catch (error) {
+        console.error('Error loading monitoring data:', error);
+        showNotification('Failed to load monitoring data', 'error');
+    }
+}
+
+// System Health
+async function loadSystemHealth() {
+    try {
+        const health = await apiCall('/monitoring/health');
+        currentMonitoringData.health = health;
+        renderSystemHealth(health);
+    } catch (error) {
+        console.error('Error loading system health:', error);
+    }
+}
+
+function renderSystemHealth(health) {
+    const container = document.getElementById('system-health-display');
+    if (!container) return;
+    
+    const statusClass = health.overall_status === 'operational' ? 'text-green-600' : 
+                       health.overall_status === 'degraded' ? 'text-yellow-600' : 'text-red-600';
+    
+    container.innerHTML = `
+        <div class="space-y-4">
+            <div class="flex items-center justify-between">
+                <h4 class="text-lg font-medium">System Status</h4>
+                <span class="px-3 py-1 rounded-full text-sm font-medium ${statusClass}">
+                    ${health.overall_status || 'unknown'}
+                </span>
+            </div>
+            ${health.components ? `
+                <div class="space-y-2">
+                    ${health.components.map(component => `
+                        <div class="flex items-center justify-between p-2 bg-gray-50 rounded">
+                            <span class="text-sm">${component.component}</span>
+                            <span class="text-xs px-2 py-1 rounded ${component.status === 'operational' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}">
+                                ${component.status}
+                            </span>
+                        </div>
+                    `).join('')}
+                </div>
+            ` : ''}
+        </div>
+    `;
+}
+
+// Alerts
+async function loadAlerts(activeOnly = true) {
+    try {
+        const alerts = await apiCall(`/monitoring/alerts?active_only=${activeOnly}&limit=10`);
+        currentMonitoringData.alerts = alerts;
+        renderAlerts(alerts);
+    } catch (error) {
+        console.error('Error loading alerts:', error);
+    }
+}
+
+function renderAlerts(alerts) {
+    const container = document.getElementById('alerts-display');
+    if (!container) return;
+    
+    if (alerts.length === 0) {
+        container.innerHTML = '<p class="text-gray-500 text-center py-4">No active alerts</p>';
+        return;
+    }
+    
+    container.innerHTML = alerts.map(alert => {
+        const severityClass = alert.severity === 'critical' ? 'bg-red-100 text-red-800' :
+                             alert.severity === 'warning' ? 'bg-yellow-100 text-yellow-800' :
+                             'bg-blue-100 text-blue-800';
+        return `
+            <div class="border-l-4 ${alert.severity === 'critical' ? 'border-red-500' : 'border-yellow-500'} p-3 bg-white rounded mb-2">
+                <div class="flex items-start justify-between">
+                    <div class="flex-1">
+                        <h5 class="font-medium text-gray-900">${alert.title}</h5>
+                        <p class="text-sm text-gray-600 mt-1">${alert.description}</p>
+                        <div class="mt-2 flex items-center space-x-4 text-xs text-gray-500">
+                            <span class="px-2 py-1 rounded ${severityClass}">${alert.severity}</span>
+                            <span>${new Date(alert.triggered_at).toLocaleString()}</span>
+                        </div>
+                    </div>
+                    ${alert.is_active ? `
+                        <button onclick="resolveAlert('${alert.id}')" class="text-green-600 hover:text-green-800 text-sm">
+                            <i class="fas fa-check"></i>
+                        </button>
+                    ` : ''}
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+async function resolveAlert(alertId) {
+    try {
+        await apiCall(`/monitoring/alerts/${alertId}/resolve`, { method: 'POST' });
+        showNotification('Alert resolved', 'success');
+        loadAlerts();
+    } catch (error) {
+        console.error('Error resolving alert:', error);
+    }
+}
+
+// Drift Detection
+async function loadRecentDrift() {
+    try {
+        const container = document.getElementById('drift-display');
+        if (container) {
+            container.innerHTML = '<p class="text-gray-500 text-center py-4">Select a model to view drift detection</p>';
+        }
+    } catch (error) {
+        console.error('Error loading drift:', error);
+    }
+}
+
+async function detectDrift(modelId, driftType = 'feature') {
+    try {
+        const endTime = new Date();
+        const startTime = new Date(endTime.getTime() - 7 * 24 * 60 * 60 * 1000);
+        
+        const params = new URLSearchParams({
+            baseline_window_start: startTime.toISOString(),
+            baseline_window_end: new Date(startTime.getTime() + 24 * 60 * 60 * 1000).toISOString(),
+            current_window_start: new Date(endTime.getTime() - 24 * 60 * 60 * 1000).toISOString(),
+            current_window_end: endTime.toISOString()
+        });
+        
+        const drift = await apiCall(`/monitoring/models/${modelId}/drift/${driftType}?${params}`, {
+            method: 'POST'
+        });
+        
+        showNotification(`${driftType} drift detection completed`, 'success');
+        return drift;
+    } catch (error) {
+        console.error('Error detecting drift:', error);
+        showNotification('Drift detection failed: ' + error.message, 'error');
+    }
+}
+
+// Performance Metrics
+async function loadPerformanceMetrics() {
+    try {
+        const container = document.getElementById('performance-metrics-display');
+        if (container) {
+            container.innerHTML = '<p class="text-gray-500 text-center py-4">Select a model to view performance metrics</p>';
+        }
+    } catch (error) {
+        console.error('Error loading performance metrics:', error);
+    }
+}
+
+async function loadModelPerformance(modelId, deploymentId = null) {
+    try {
+        const endTime = new Date();
+        const startTime = new Date(endTime.getTime() - 24 * 60 * 60 * 1000);
+        
+        const params = new URLSearchParams({
+            start_time: startTime.toISOString(),
+            end_time: endTime.toISOString()
+        });
+        if (deploymentId) params.append('deployment_id', deploymentId);
+        
+        const metrics = await apiCall(`/monitoring/models/${modelId}/performance?${params}`);
+        renderPerformanceMetrics(metrics);
+        return metrics;
+    } catch (error) {
+        console.error('Error loading model performance:', error);
+        showNotification('Failed to load performance metrics', 'error');
+    }
+}
+
+function renderPerformanceMetrics(metrics) {
+    const container = document.getElementById('performance-metrics-display');
+    if (!container) return;
+    
+    container.innerHTML = `
+        <div class="grid grid-cols-2 gap-4">
+            <div class="bg-blue-50 p-4 rounded">
+                <div class="text-sm text-gray-600">Total Predictions</div>
+                <div class="text-2xl font-bold text-blue-600">${metrics.total_predictions || 0}</div>
+            </div>
+            <div class="bg-green-50 p-4 rounded">
+                <div class="text-sm text-gray-600">Success Rate</div>
+                <div class="text-2xl font-bold text-green-600">${((metrics.success_rate || 0) * 100).toFixed(1)}%</div>
+            </div>
+            <div class="bg-purple-50 p-4 rounded">
+                <div class="text-sm text-gray-600">Avg Latency</div>
+                <div class="text-2xl font-bold text-purple-600">${Math.round(metrics.avg_latency_ms || 0)}ms</div>
+            </div>
+            <div class="bg-orange-50 p-4 rounded">
+                <div class="text-sm text-gray-600">Error Rate</div>
+                <div class="text-2xl font-bold text-orange-600">${((metrics.error_rate || 0) * 100).toFixed(1)}%</div>
+            </div>
+        </div>
+    `;
+}
+
+// Prediction Logs
+async function loadPredictionLogs(modelId, limit = 50) {
+    try {
+        const logs = await apiCall(`/monitoring/models/${modelId}/predictions/logs?limit=${limit}`);
+        return logs;
+    } catch (error) {
+        console.error('Error loading prediction logs:', error);
+        return [];
+    }
+}
+
+// Aggregated Metrics
+async function loadAggregatedMetrics(modelId = null, timeRange = '24h') {
+    try {
+        const params = new URLSearchParams({ time_range: timeRange });
+        const endpoint = modelId 
+            ? `/monitoring/models/${modelId}/metrics/aggregated?${params}`
+            : `/monitoring/models/all/metrics/aggregated?${params}`;
+        const metrics = await apiCall(endpoint);
+        return metrics;
+    } catch (error) {
+        console.error('Error loading aggregated metrics:', error);
+        return {};
+    }
+}
+
+// Deployment Summary
+async function loadDeploymentSummary(deploymentId) {
+    try {
+        const summary = await apiCall(`/monitoring/deployments/${deploymentId}/summary`);
+        return summary;
+    } catch (error) {
+        console.error('Error loading deployment summary:', error);
+        return null;
+    }
+}
+
+// Confidence Metrics
+async function loadConfidenceMetrics(modelId, startTime, endTime, deploymentId = null) {
+    try {
+        const params = new URLSearchParams({
+            start_time: startTime.toISOString(),
+            end_time: endTime.toISOString()
+        });
+        if (deploymentId) params.append('deployment_id', deploymentId);
+        
+        const metrics = await apiCall(`/monitoring/models/${modelId}/confidence?${params}`);
+        return metrics;
+    } catch (error) {
+        console.error('Error loading confidence metrics:', error);
+        return null;
+    }
+}
+
+// Resource Usage
+async function loadResourceUsage(modelId, deploymentId = null) {
+    try {
+        const params = deploymentId ? `?deployment_id=${deploymentId}` : '';
+        const usage = await apiCall(`/monitoring/models/${modelId}/resources${params}`);
+        return usage;
+    } catch (error) {
+        console.error('Error loading resource usage:', error);
+        return null;
+    }
+}
+
+// Export monitoring functions
+window.loadMonitoringData = loadMonitoringData;
+window.loadSystemHealth = loadSystemHealth;
+window.loadAlerts = loadAlerts;
+window.resolveAlert = resolveAlert;
+window.detectDrift = detectDrift;
+window.loadModelPerformance = loadModelPerformance;
+window.loadPredictionLogs = loadPredictionLogs;
+window.loadAggregatedMetrics = loadAggregatedMetrics;
+window.loadDeploymentSummary = loadDeploymentSummary;
+window.loadConfidenceMetrics = loadConfidenceMetrics;
+window.loadResourceUsage = loadResourceUsage; 
