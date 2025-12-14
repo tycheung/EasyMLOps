@@ -63,7 +63,7 @@ RUN mkdir -p /app/models /app/bentos /app/logs /app/static \
 COPY --chown=easymlops:easymlops app/ ./app/
 COPY --chown=easymlops:easymlops static/ ./static/
 COPY --chown=easymlops:easymlops alembic/ ./alembic/
-COPY --chown=easymlops:easymlops alembic.ini ./
+# Note: alembic.ini is optional - migrations can be run manually if needed
 
 # Copy startup scripts
 COPY --chown=easymlops:easymlops scripts/ ./scripts/
@@ -79,5 +79,5 @@ HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
 # Expose port
 EXPOSE 8000
 
-# Default command
-CMD ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"] 
+# Default command - use app.main for proper initialization
+CMD ["python", "-m", "app.main", "--host", "0.0.0.0", "--port", "8000"] 

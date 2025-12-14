@@ -20,11 +20,11 @@ echo "Checking database connectivity..."
 python -c "
 import sys
 from sqlalchemy import create_engine, text
-from app.core.config import get_settings
+from app.config import get_settings
 
 try:
     settings = get_settings()
-    engine = create_engine(str(settings.database_url))
+    engine = create_engine(str(settings.DATABASE_URL))
     with engine.connect() as connection:
         result = connection.execute(text('SELECT 1'))
         print('✓ Database is accessible')

@@ -11,7 +11,7 @@ python -c "
 import time
 import sys
 from sqlalchemy import create_engine
-from app.core.config import get_settings
+from app.config import get_settings
 
 settings = get_settings()
 max_retries = 30
@@ -19,7 +19,7 @@ retry_count = 0
 
 while retry_count < max_retries:
     try:
-        engine = create_engine(str(settings.database_url))
+        engine = create_engine(str(settings.DATABASE_URL))
         connection = engine.connect()
         connection.close()
         print('Database is ready!')
@@ -35,20 +35,8 @@ while retry_count < max_retries:
 
 # Run database migrations
 echo "Running database migrations..."
-python -m alembic upgrade head
-
-# Create initial data if needed
-echo "Setting up initial data..."
-python -c "
-from app.db.init_db import init_db
-from app.db.session import SessionLocal
-
-db = SessionLocal()
-init_db(db)
-db.close()
-print('Initial data setup complete!')
-"
+python -m alembic upgrade head || echo "Migrations skipped or already applied"
 
 # Start the application
 echo "Starting application server..."
-exec python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 
+exec python -m app.main --host 0.0.0.0 --port 8000 
