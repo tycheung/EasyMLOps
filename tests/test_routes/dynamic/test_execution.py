@@ -321,10 +321,10 @@ class TestPredictionHelpers:
     
     def test_simulate_sklearn_prediction(self, sample_deployment):
         """Test sklearn prediction simulation"""
-        from app.routes.dynamic import _simulate_sklearn_prediction
+        from app.routes.dynamic.simulation_helpers import simulate_sklearn_prediction
         
         request_data = {"data": [1, 2, 3, 4]}
-        result = _simulate_sklearn_prediction(sample_deployment, request_data)
+        result = simulate_sklearn_prediction(sample_deployment, request_data)
         
         assert isinstance(result, dict)
         assert "predictions" in result
@@ -334,11 +334,11 @@ class TestPredictionHelpers:
     
     def test_simulate_tensorflow_prediction(self, sample_deployment):
         """Test TensorFlow prediction simulation"""
-        from app.routes.dynamic import _simulate_tensorflow_prediction
+        from app.routes.dynamic.simulation_helpers import simulate_tensorflow_prediction
         
         sample_deployment.framework = "tensorflow"
         request_data = {"data": [[1, 2, 3, 4]]}
-        result = _simulate_tensorflow_prediction(sample_deployment, request_data)
+        result = simulate_tensorflow_prediction(sample_deployment, request_data)
         
         assert isinstance(result, dict)
         assert "predictions" in result
@@ -347,11 +347,11 @@ class TestPredictionHelpers:
     
     def test_simulate_pytorch_prediction(self, sample_deployment):
         """Test PyTorch prediction simulation"""
-        from app.routes.dynamic import _simulate_pytorch_prediction
+        from app.routes.dynamic.simulation_helpers import simulate_pytorch_prediction
         
         sample_deployment.framework = "pytorch"
         request_data = {"data": [1, 2, 3, 4]}
-        result = _simulate_pytorch_prediction(sample_deployment, request_data)
+        result = simulate_pytorch_prediction(sample_deployment, request_data)
         
         assert isinstance(result, dict)
         assert "predictions" in result
@@ -359,11 +359,11 @@ class TestPredictionHelpers:
     
     def test_simulate_boosting_prediction(self, sample_deployment):
         """Test XGBoost/LightGBM prediction simulation"""
-        from app.routes.dynamic import _simulate_boosting_prediction
+        from app.routes.dynamic.simulation_helpers import simulate_boosting_prediction
         
         sample_deployment.framework = "xgboost"
         request_data = {"data": [1, 2, 3, 4]}
-        result = _simulate_boosting_prediction(sample_deployment, request_data)
+        result = simulate_boosting_prediction(sample_deployment, request_data)
         
         assert isinstance(result, dict)
         assert "predictions" in result
@@ -371,11 +371,11 @@ class TestPredictionHelpers:
     
     def test_simulate_generic_prediction(self, sample_deployment):
         """Test generic prediction simulation"""
-        from app.routes.dynamic import _simulate_generic_prediction
+        from app.routes.dynamic.simulation_helpers import simulate_generic_prediction
         
         sample_deployment.framework = "unknown"
         request_data = {"data": [1, 2, 3, 4]}
-        result = _simulate_generic_prediction(sample_deployment, request_data)
+        result = simulate_generic_prediction(sample_deployment, request_data)
         
         assert isinstance(result, dict)
         assert "predictions" in result
@@ -388,7 +388,7 @@ class TestPredictionLogging:
     @patch('app.database.get_async_session')
     def test_log_prediction_success(self, mock_get_session):
         """Test successful prediction logging"""
-        from app.routes.dynamic import _log_prediction
+        from app.routes.dynamic.logging_helpers import log_prediction
         from app.models.model import ModelDeployment
         
         mock_session = MagicMock()
@@ -402,7 +402,7 @@ class TestPredictionLogging:
         request_data = {"data": [1, 2, 3]}
         response_data = {"predictions": [0.75]}
         
-        asyncio.run(_log_prediction(
+        asyncio.run(log_prediction(
             mock_session, "deploy_123", request_data, response_data
         ))
         
@@ -411,7 +411,7 @@ class TestPredictionLogging:
     @patch('app.database.get_async_session')
     def test_log_prediction_batch(self, mock_get_session):
         """Test batch prediction logging"""
-        from app.routes.dynamic import _log_prediction
+        from app.routes.dynamic.logging_helpers import log_prediction
         from app.models.model import ModelDeployment
         
         mock_session = MagicMock()
@@ -425,7 +425,7 @@ class TestPredictionLogging:
         request_data = {"data": [[1, 2], [3, 4]]}
         response_data = {"predictions": [0.75, 0.85]}
         
-        asyncio.run(_log_prediction(
+        asyncio.run(log_prediction(
             mock_session, "deploy_123", request_data, response_data, is_batch=True
         ))
         
@@ -434,12 +434,12 @@ class TestPredictionLogging:
     @patch('app.database.get_async_session')
     def test_log_prediction_error_handling(self, mock_get_session):
         """Test prediction logging error handling"""
-        from app.routes.dynamic import _log_prediction
+        from app.routes.dynamic.logging_helpers import log_prediction
         
         mock_session = MagicMock()
         mock_session.add.side_effect = Exception("Database error")
         
-        asyncio.run(_log_prediction(
+        asyncio.run(log_prediction(
             mock_session, "deploy_123", {}, {}
         ))
 

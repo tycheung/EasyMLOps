@@ -13,7 +13,7 @@ import uuid
 
 from app.core.app_factory import create_app
 from app.models.model import ModelDeployment
-from app.routes.dynamic import route_manager
+from app.routes.dynamic.route_manager import DynamicRouteManager
 
 
 @pytest.fixture
@@ -35,13 +35,18 @@ def sample_deployment(test_model):
 class TestDynamicRouteManager:
     """Test dynamic route manager functionality"""
     
-    def test_register_deployment_route(self, sample_deployment):
+    @pytest.fixture
+    def route_manager(self):
+        """Create a fresh route manager instance"""
+        return DynamicRouteManager()
+    
+    @pytest.mark.asyncio
+    async def test_register_deployment_route(self, route_manager, sample_deployment):
         """Test registering a deployment route"""
         route_manager.active_routes.clear()
         
         # Register route
-        import asyncio
-        asyncio.run(route_manager.register_deployment_route(sample_deployment))
+        await route_manager.register_deployment_route(sample_deployment)
         
         # Verify route was registered
         assert sample_deployment.id in route_manager.active_routes
@@ -50,17 +55,16 @@ class TestDynamicRouteManager:
         assert route_info['model_id'] == sample_deployment.model_id
         assert route_info['framework'] == 'sklearn'
     
-    def test_unregister_deployment_route(self, sample_deployment):
+    @pytest.mark.asyncio
+    async def test_unregister_deployment_route(self, route_manager, sample_deployment):
         """Test unregistering a deployment route"""
+        route_manager.active_routes.clear()
+        
         # First register the route
-        route_manager.active_routes[sample_deployment.id] = {
-            'deployment_id': sample_deployment.id,
-            'model_id': sample_deployment.model_id
-        }
+        await route_manager.register_deployment_route(sample_deployment)
         
         # Unregister route
-        import asyncio
-        asyncio.run(route_manager.unregister_deployment_route(sample_deployment.id))
+        await route_manager.unregister_deployment_route(sample_deployment.id)
         
         # Verify route was unregistered
         assert sample_deployment.id not in route_manager.active_routes

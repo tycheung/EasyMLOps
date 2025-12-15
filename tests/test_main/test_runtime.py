@@ -33,7 +33,7 @@ class TestRequestLoggingMiddleware:
     @pytest.mark.asyncio
     async def test_middleware_logs_requests(self, test_app, mock_logger):
         """Test middleware logs incoming requests"""
-        middleware = RequestLoggingMiddleware(test_app)
+        middleware = RequestLoggingMiddleware(app=test_app)
         
         from starlette.datastructures import URL
         
@@ -49,16 +49,17 @@ class TestRequestLoggingMiddleware:
         async def mock_call_next(request):
             return mock_response
         
-        response = await middleware.dispatch(mock_request, mock_call_next)
-        
-        assert hasattr(mock_request.state, 'request_id')
-        assert 'X-Request-ID' in response.headers
-        assert 'X-Process-Time' in response.headers
+        with patch('app.core.app_factory.logger') as mock_log:
+            response = await middleware.dispatch(mock_request, mock_call_next)
+            
+            assert hasattr(mock_request.state, 'request_id')
+            assert 'X-Request-ID' in response.headers
+            assert 'X-Process-Time' in response.headers
     
     @pytest.mark.asyncio
     async def test_middleware_handles_exceptions(self, test_app, mock_logger):
         """Test middleware handles exceptions properly"""
-        middleware = RequestLoggingMiddleware(test_app)
+        middleware = RequestLoggingMiddleware(app=test_app)
         
         from starlette.datastructures import URL
         
@@ -70,11 +71,11 @@ class TestRequestLoggingMiddleware:
         async def mock_call_next_error(request):
             raise Exception("Test error")
         
-        with pytest.raises(Exception, match="Test error"):
-            await middleware.dispatch(mock_request, mock_call_next_error)
-        
-        if mock_logger:
-            mock_logger.error.assert_called()
+        with patch('app.core.app_factory.logger') as mock_log:
+            with pytest.raises(Exception, match="Test error"):
+                await middleware.dispatch(mock_request, mock_call_next_error)
+            
+            mock_log.error.assert_called()
 
 
 class TestExceptionHandlers:
