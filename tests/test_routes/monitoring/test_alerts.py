@@ -257,11 +257,16 @@ class TestAlertRules:
     def test_list_alert_rules(self, client, test_session):
         """Test listing all alert rules"""
         from app.models.monitoring import AlertRuleDB
+        import uuid
         from datetime import datetime
         
-        # Create test data
+        # Create test data with unique IDs
+        rule1_id = str(uuid.uuid4())
+        rule2_id = str(uuid.uuid4())
+        model_id = str(uuid.uuid4())
+        
         rule1 = AlertRuleDB(
-            id="rule_1",
+            id=rule1_id,
             rule_name="rule_1",
             metric_name="latency",
             condition="gt",
@@ -272,14 +277,14 @@ class TestAlertRules:
             created_at=datetime.utcnow()
         )
         rule2 = AlertRuleDB(
-            id="rule_2",
+            id=rule2_id,
             rule_name="rule_2",
             metric_name="error_rate",
             condition="gt",
             threshold_value=5.0,
             severity="critical",
             component="model_service",
-            model_id="model_123",
+            model_id=model_id,
             is_active=False,
             created_at=datetime.utcnow()
         )
@@ -294,8 +299,8 @@ class TestAlertRules:
         result = response.json()
         assert len(result) >= 2
         rule_ids = [r["id"] for r in result]
-        assert "rule_1" in rule_ids
-        assert "rule_2" in rule_ids
+        assert rule1_id in rule_ids
+        assert rule2_id in rule_ids
         
         # Test filtering by is_active
         response = client.get("/api/v1/monitoring/alert-rules?is_active=true")
@@ -305,7 +310,7 @@ class TestAlertRules:
         assert all(r["is_active"] is True for r in result)
         
         # Test filtering by model_id
-        response = client.get("/api/v1/monitoring/alert-rules?model_id=model_123")
+        response = client.get(f"/api/v1/monitoring/alert-rules?model_id={model_id}")
         assert response.status_code == 200
         result = response.json()
         assert len(result) >= 1

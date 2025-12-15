@@ -180,9 +180,9 @@ def test_deployment(test_session, test_model, sample_deployment_data):
 def mock_prediction_log(test_session, test_model):
     """Create a mock prediction log for testing"""
     log = PredictionLogDB(
-        id="test_log_123",
+        id=str(uuid.uuid4()),
         model_id=test_model.id,
-        request_id="req_123",
+        request_id=str(uuid.uuid4()),
         input_data={"feature1": 0.5, "feature2": "test"},
         output_data={"prediction": "class_a", "probability": 0.85},
         latency_ms=150.5,
@@ -201,7 +201,7 @@ def mock_performance_metric(test_session, test_model):
     now = datetime.utcnow()
     
     metric = ModelPerformanceMetricsDB(
-        id="test_metric_123",
+        id=str(uuid.uuid4()),
         model_id=test_model.id,
         time_window_start=now - timedelta(hours=1),
         time_window_end=now,
@@ -228,7 +228,7 @@ def mock_performance_metric(test_session, test_model):
 def mock_system_health_metric(test_session):
     """Create a mock system health metric for testing"""
     metric = SystemHealthMetricDB(
-        id="test_health_123",
+        id=str(uuid.uuid4()),
         component="api_server",
         metric_type="cpu_usage",
         value=45.2,
@@ -246,7 +246,7 @@ def sample_alerts_list(test_session):
     test_session.query(AlertDB).delete()
     
     alert1_data = {
-        "id": "alert_1",
+        "id": str(uuid.uuid4()),
         "severity": AlertSeverity.WARNING,
         "component": SystemComponent.API_SERVER,
         "title": "High CPU Usage",
@@ -256,7 +256,7 @@ def sample_alerts_list(test_session):
         "is_acknowledged": False
     }
     alert2_data = {
-        "id": "alert_2",
+        "id": str(uuid.uuid4()),
         "severity": AlertSeverity.CRITICAL,
         "component": SystemComponent.MODEL_SERVICE,
         "title": "Model Degradation",

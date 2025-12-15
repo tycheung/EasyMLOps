@@ -3,13 +3,13 @@ Test services module
 Exports all service test classes for backward compatibility
 """
 
-from .test_monitoring_basic import (
+from .monitoring.test_basic import (
     TestMonitoringService,
     TestServiceIntegration as TestServiceIntegrationMonitoring,
     TestServiceErrorHandling as TestServiceErrorHandlingMonitoring,
 )
 
-from .test_other_services import (
+from .monitoring.test_other_services import (
     TestBentoMLService,
     TestSchemaService,
     TestDeploymentService,

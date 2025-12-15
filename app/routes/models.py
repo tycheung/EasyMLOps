@@ -97,8 +97,8 @@ async def upload_model(
         )
         
         # Validate the model file
-        is_valid = await ModelValidator.validate_model_file_async(storage_path)
-        if not is_valid:
+        validation_result = await ModelValidator.validate_model_file_async(storage_path)
+        if not validation_result.is_valid:
             # Clean up the uploaded file
             await aios.remove(storage_path)
             raise HTTPException(
@@ -110,7 +110,8 @@ async def upload_model(
         file_hash = await ModelValidator.calculate_file_hash_async(storage_path)
         
         # Detect framework if not provided or validate provided framework
-        detected_framework = await ModelValidator.detect_framework_from_file_async(storage_path)
+        from app.utils.model_utils.frameworks import FrameworkDetector
+        detected_framework = await FrameworkDetector.detect_framework_from_file_async(storage_path)
         if detected_framework and detected_framework != framework:
             logger.warning(f"Framework mismatch: provided={framework}, detected={detected_framework}")
         

@@ -2,16 +2,55 @@
 
 This directory contains comprehensive unit and integration tests for the EasyMLOps platform.
 
+## 📊 Test Statistics
+
+- **Total Tests**: 1,366+ tests
+- **Overall Coverage**: 56% (up from 37%)
+- **Key Module Coverage**:
+  - Deployment Service: 73%
+  - Drift Routes: 95%
+  - Alert Rules: 88%
+  - A/B Testing: 45% (73% when tests pass individually)
+- **Test Isolation**: UUID-based fixtures prevent test interference
+- **Test File Organization**: Modular structure with files under 500 lines
+
 ## 📁 Test Structure
 
 ```
 tests/
-├── conftest.py              # Pytest configuration and fixtures
-├── test_config.py           # Configuration module tests
+├── conftest.py              # Pytest configuration and shared fixtures
+├── fixtures/                # Reusable test fixtures
+│   ├── database.py         # Database fixtures with UUID-based isolation
+│   └── services.py         # Service fixtures
+├── test_config.py          # Configuration module tests
 ├── test_database.py         # Database operations tests
-├── test_models.py           # Database models tests
-├── test_routes_dynamic.py   # API routes tests
-├── test_services.py         # Service layer tests
+├── test_models/            # Database models tests
+│   └── test_models.py
+├── test_routes/            # API route tests (organized by domain)
+│   ├── monitoring/         # Monitoring route tests
+│   │   ├── test_drift_comprehensive.py      # 95% coverage
+│   │   ├── test_alerts.py
+│   │   ├── test_ab_testing.py
+│   │   ├── test_canary.py
+│   │   ├── test_analytics.py
+│   │   ├── test_governance.py
+│   │   └── ...             # Domain-specific route tests
+│   ├── dynamic/            # Dynamic route tests
+│   ├── schemas/            # Schema route tests
+│   └── ...                 # Additional route tests
+├── test_services/          # Service layer tests (organized by domain)
+│   ├── monitoring/         # Monitoring service tests
+│   │   ├── test_ab_testing_comprehensive.py
+│   │   ├── test_ab_testing_private_methods.py
+│   │   ├── test_alert_rules.py              # 88% coverage
+│   │   ├── test_alert_management_comprehensive.py
+│   │   └── ...             # Domain-specific service tests
+│   ├── test_deployment_service_comprehensive.py  # 73% coverage
+│   └── ...                 # Additional service tests
+├── test_core/              # Core application tests
+│   ├── test_app_factory_comprehensive.py
+│   └── test_routes_comprehensive.py
+├── test_utils/             # Utility tests
 └── README.md               # This file
 ```
 
@@ -128,14 +167,18 @@ Key fixtures available in `conftest.py`:
 
 #### Database Fixtures
 - `test_engine` - Test database engine
-- `test_session` - Database session for tests
+- `test_session` - Database session for tests (isolated per test)
+- `isolated_test_session` - Synchronous isolated database session for test isolation
 - `test_settings` - Test configuration
 
 #### Model Fixtures
-- `test_model` - Sample model instance
-- `test_deployment` - Sample deployment instance
+- `test_model` - Sample model instance (UUID-based ID)
+- `sample_deployment` - Sample deployment instance (UUID-based ID)
 - `sample_model_data` - Test model data
 - `temp_model_file` - Temporary model file
+- `mock_prediction_log` - Mock prediction log (UUID-based ID)
+- `mock_performance_metric` - Mock performance metric (UUID-based ID)
+- `sample_alerts_list` - Sample alerts (UUID-based IDs)
 
 #### API Fixtures
 - `client` - FastAPI test client
@@ -143,10 +186,20 @@ Key fixtures available in `conftest.py`:
 
 ## 📊 Coverage
 
-The test suite aims for >85% code coverage. Coverage reports are generated in:
+The test suite currently achieves **56% overall coverage** (up from 37%), with key modules achieving 70-95% coverage. Coverage reports are generated in:
 - Terminal: Summary report
 - HTML: `htmlcov/index.html`
 - XML: `coverage.xml` (for CI/CD)
+
+### Coverage by Module
+
+| Module | Coverage | Status |
+|--------|----------|--------|
+| Deployment Service | 73% | ✅ Excellent |
+| Drift Routes | 95% | ✅ Excellent |
+| Alert Rules | 88% | ✅ Excellent |
+| A/B Testing | 45% | 🔄 In Progress |
+| Overall | 56% | ✅ Good |
 
 ### Running Coverage
 ```bash
@@ -158,6 +211,9 @@ python -m pytest --cov=app --cov-report=term-missing
 
 # HTML report
 python -m pytest --cov=app --cov-report=html
+
+# Coverage for specific module
+python -m pytest --cov=app.services.deployment_service --cov-report=term
 ```
 
 ## 🏃‍♂️ Test Development
@@ -369,6 +425,8 @@ def test_with_secrets(self):
 - Each test should be independent
 - Use fixtures for shared setup
 - Clean up after tests (automatic with fixtures)
+- **Use UUIDs for test data**: All fixtures use `str(uuid.uuid4())` instead of hardcoded IDs to prevent test isolation issues
+- **Isolated database sessions**: Each test gets a fresh database session via `test_session` fixture
 
 ### Error Testing
 ```python
@@ -417,4 +475,29 @@ When adding new features:
 - [ ] Error handling tests
 - [ ] Edge case tests
 - [ ] Performance considerations
-- [ ] Documentation updates 
+- [ ] Documentation updates
+- [ ] **Use UUIDs for test data IDs** (not hardcoded strings)
+- [ ] **Ensure test isolation** (no shared state between tests)
+- [ ] **Keep test files under 500 lines** (split if needed)
+
+## 🔧 Recent Improvements
+
+### Test Isolation Fixes
+- Replaced all hardcoded IDs with UUIDs in fixtures
+- Fixed test interference issues in:
+  - `tests/fixtures/database.py`
+  - `tests/test_services/monitoring/test_alert_rules.py`
+  - `tests/test_services/monitoring/test_alert_management_comprehensive.py`
+  - `tests/test_routes/monitoring/test_alerts.py`
+  - `tests/test_services/test_deployment_service_comprehensive.py`
+
+### Coverage Improvements
+- Added comprehensive tests for `deployment_service.py` (54% → 73%)
+- Added error handling tests for drift routes (90% → 95%)
+- Added tests for alert rules service (18% → 88%)
+- Added tests for A/B testing private methods
+
+### Test Organization
+- Reorganized test files to mirror application structure
+- Split large test files to stay under 500 lines
+- Created domain-specific test directories (`monitoring/`, `dynamic/`, `schemas/`) 

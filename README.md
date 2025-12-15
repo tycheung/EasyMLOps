@@ -57,10 +57,13 @@ A comprehensive ML Operations platform that empowers data scientists to deploy m
 - **Error Handling**: Global exception handling with structured error responses
 
 ### 🧪 **Comprehensive Testing**
-- **Extensive Test Suite**: 623+ tests covering all functionality
+- **Extensive Test Suite**: 1,366+ tests covering all functionality
+- **High Test Coverage**: 56% overall coverage (up from 37%), with key modules at 70-95% coverage
+- **Test Isolation**: Proper test isolation using UUIDs to prevent test interference
 - **Multiple Test Types**: Unit, integration, API, service, and monitoring tests
 - **Test Categories**: Organized by functionality (models, deployments, schemas, monitoring, A/B testing, canary, drift, etc.)
 - **Modular Architecture**: Refactored codebase with all files under 500 lines for maintainability
+- **Comprehensive Service Tests**: Deployment service (73% coverage), drift routes (95% coverage), alert rules (88% coverage)
 - **CI/CD Ready**: Automated testing with coverage reporting
 - **Cross-Platform**: Windows, Linux, macOS compatibility
 
@@ -390,13 +393,31 @@ easymlops/
 │               ├── detector.py
 │               ├── sklearn_detector.py
 │               └── ...
-├── tests/                  # Comprehensive test suite (623+ tests)
+├── tests/                  # Comprehensive test suite (1,366+ tests, 56% coverage)
+│   ├── conftest.py         # Pytest configuration and shared fixtures
+│   ├── fixtures/            # Reusable test fixtures
+│   │   ├── database.py     # Database fixtures with UUID-based isolation
+│   │   └── services.py     # Service fixtures
 │   ├── test_services/      # Service layer tests (refactored)
-│   │   ├── test_monitoring_performance.py
-│   │   ├── test_monitoring_drift.py
-│   │   ├── test_monitoring_ab_testing.py
-│   │   └── ...             # Domain-specific test modules
+│   │   ├── monitoring/     # Monitoring service tests
+│   │   │   ├── test_ab_testing_comprehensive.py
+│   │   │   ├── test_ab_testing_private_methods.py
+│   │   │   ├── test_alert_rules.py
+│   │   │   ├── test_alert_management_comprehensive.py
+│   │   │   └── ...         # Domain-specific test modules
+│   │   ├── test_deployment_service_comprehensive.py  # 73% coverage
+│   │   └── ...             # Additional service tests
 │   ├── test_routes/        # API route tests
+│   │   ├── monitoring/    # Monitoring route tests
+│   │   │   ├── test_drift_comprehensive.py  # 95% coverage
+│   │   │   ├── test_alerts.py
+│   │   │   ├── test_ab_testing.py
+│   │   │   └── ...         # Domain-specific route tests
+│   │   ├── dynamic/        # Dynamic route tests
+│   │   ├── schemas/        # Schema route tests
+│   │   └── ...             # Additional route tests
+│   ├── test_core/          # Core application tests
+│   ├── test_models/        # Database model tests
 │   ├── test_utils/         # Utility tests
 │   └── ...                 # Additional test modules
 ├── static/                 # Web interface files
@@ -416,7 +437,7 @@ easymlops/
 
 ### **Advanced Test Runner**
 ```bash
-# Run all tests (623+ tests)
+# Run all tests (1,366+ tests, 56% coverage)
 python run_tests.py
 
 # Run specific test categories
@@ -763,6 +784,9 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 - **🔄 Lifecycle Management**: Model cards, retraining jobs with UI
 - **🔗 Integrations**: External integrations and webhooks with UI structure
 - **📜 Audit Logging**: Complete audit trail viewer with filtering
+- **🧪 Test Coverage**: Comprehensive test suite with 56% overall coverage (up from 37%)
+- **🔧 Test Quality**: Fixed test isolation issues using UUID-based fixtures
+- **📈 Service Testing**: Deployment service (73% coverage), drift routes (95% coverage), alert rules (88% coverage)
 
 ### **Planned Features**
 - **☁️ Multi-Cloud**: Support for AWS, GCP, Azure deployments
