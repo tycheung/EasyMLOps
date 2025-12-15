@@ -150,5 +150,115 @@ class TestIntegrationAdvanced:
         assert response.status_code == 201
         result = response.json()
         assert result["id"] == "agg_config_123"
-        mock_create.assert_called_once() 
+        mock_create.assert_called_once()
 
+
+class TestIntegrationGET:
+    """Test integration GET endpoints"""
+    
+    def test_list_integrations(self, client, test_session):
+        """Test listing all external integrations"""
+        from app.models.monitoring import ExternalIntegrationDB
+        from datetime import datetime
+        
+        integration1 = ExternalIntegrationDB(
+            id="integration_1",
+            integration_type="datadog",
+            integration_name="Datadog Integration",
+            description="Datadog monitoring integration",
+            config={"api_key": "test_key"},
+            is_active=True,
+            created_at=datetime.utcnow()
+        )
+        integration2 = ExternalIntegrationDB(
+            id="integration_2",
+            integration_type="prometheus",
+            integration_name="Prometheus Integration",
+            description="Prometheus monitoring integration",
+            config={"endpoint": "http://prometheus:9090"},
+            is_active=False,
+            created_at=datetime.utcnow()
+        )
+        
+        test_session.add(integration1)
+        test_session.add(integration2)
+        test_session.commit()
+        
+        # Test listing all
+        response = client.get("/api/v1/monitoring/integrations")
+        assert response.status_code == 200
+        result = response.json()
+        assert len(result) >= 2
+        integration_ids = [i["id"] for i in result]
+        assert "integration_1" in integration_ids
+        assert "integration_2" in integration_ids
+        
+        # Test filtering by integration_type
+        response = client.get("/api/v1/monitoring/integrations?integration_type=datadog")
+        assert response.status_code == 200
+        result = response.json()
+        assert len(result) >= 1
+        assert all(i["integration_type"] == "datadog" for i in result)
+        
+        # Test filtering by is_active
+        response = client.get("/api/v1/monitoring/integrations?is_active=true")
+        assert response.status_code == 200
+        result = response.json()
+        assert len(result) >= 1
+        assert all(i["is_active"] is True for i in result)
+        
+        # Test limit
+        response = client.get("/api/v1/monitoring/integrations?limit=1")
+        assert response.status_code == 200
+        result = response.json()
+        assert len(result) <= 1
+    
+    def test_list_webhooks(self, client, test_session):
+        """Test listing all webhook configurations"""
+        from app.models.monitoring import WebhookConfigDB
+        from datetime import datetime
+        
+        webhook1 = WebhookConfigDB(
+            id="webhook_1",
+            webhook_name="Alert Webhook",
+            webhook_url="https://example.com/webhook",
+            trigger_events=["alert.created", "alert.resolved"],
+            headers={"Authorization": "Bearer token"},
+            is_active=True,
+            created_at=datetime.utcnow()
+        )
+        webhook2 = WebhookConfigDB(
+            id="webhook_2",
+            webhook_name="Deployment Webhook",
+            webhook_url="https://example.com/deploy",
+            trigger_events=["deployment.started", "deployment.completed"],
+            headers={},
+            is_active=False,
+            created_at=datetime.utcnow()
+        )
+        
+        test_session.add(webhook1)
+        test_session.add(webhook2)
+        test_session.commit()
+        
+        # Test listing all
+        response = client.get("/api/v1/monitoring/integrations/webhooks")
+        assert response.status_code == 200
+        result = response.json()
+        assert len(result) >= 2
+        webhook_ids = [w["id"] for w in result]
+        assert "webhook_1" in webhook_ids
+        assert "webhook_2" in webhook_ids
+        
+        # Test filtering by is_active
+        response = client.get("/api/v1/monitoring/integrations/webhooks?is_active=true")
+        assert response.status_code == 200
+        result = response.json()
+        assert len(result) >= 1
+        assert all(w["is_active"] is True for w in result)
+        
+        # Test limit
+        response = client.get("/api/v1/monitoring/integrations/webhooks?limit=1")
+        assert response.status_code == 200
+        result = response.json()
+        assert len(result) <= 1 

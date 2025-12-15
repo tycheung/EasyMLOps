@@ -4,15 +4,110 @@ Provides endpoints for A/B testing and canary deployment management
 """
 
 from datetime import datetime, timedelta
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from fastapi import APIRouter, HTTPException, Query
 import logging
 
 from app.schemas.monitoring import ABTest, ABTestMetrics, CanaryDeployment, CanaryMetrics
 from app.services.monitoring_service import monitoring_service
+from app.database import get_session
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["monitoring"])
+
+
+@router.get("/ab-tests", response_model=List[ABTest])
+async def list_ab_tests(
+    status: Optional[str] = Query(None, description="Filter by status"),
+    model_id: Optional[str] = Query(None, description="Filter by model ID"),
+    limit: int = Query(100, description="Maximum number of tests to return")
+):
+    """List all A/B tests"""
+    try:
+        async with get_session() as session:
+            from app.models.monitoring import ABTestDB
+            from sqlalchemy import select, desc
+            
+            stmt = select(ABTestDB)
+            
+            if status:
+                stmt = stmt.where(ABTestDB.status == status)
+            if model_id:
+                stmt = stmt.where(
+                    (ABTestDB.variant_a_model_id == model_id) | 
+                    (ABTestDB.variant_b_model_id == model_id)
+                )
+            
+            stmt = stmt.order_by(desc(ABTestDB.created_at)).limit(limit)
+            result = await session.execute(stmt)
+            tests_db = result.scalars().all()
+            
+            return [
+                ABTest(
+                    id=test.id,
+                    test_name=test.test_name,
+                    description=test.description,
+                    model_name=test.model_name,
+                    variant_a_model_id=test.variant_a_model_id,
+                    variant_b_model_id=test.variant_b_model_id,
+                    variant_a_deployment_id=test.variant_a_deployment_id,
+                    variant_b_deployment_id=test.variant_b_deployment_id,
+                    variant_a_percentage=test.variant_a_percentage,
+                    variant_b_percentage=test.variant_b_percentage,
+                    use_sticky_sessions=test.use_sticky_sessions,
+                    status=test.status,
+                    scheduled_start=test.scheduled_start,
+                    scheduled_end=test.scheduled_end,
+                    min_sample_size=test.min_sample_size,
+                    significance_level=test.significance_level,
+                    primary_metric=test.primary_metric,
+                    config=test.config or {},
+                    created_by=test.created_by
+                )
+                for test in tests_db
+            ]
+    except Exception as e:
+        logger.error(f"Error listing A/B tests: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/ab-tests/{test_id}", response_model=ABTest)
+async def get_ab_test(test_id: str):
+    """Get a specific A/B test by ID"""
+    try:
+        async with get_session() as session:
+            from app.models.monitoring import ABTestDB
+            
+            test = await session.get(ABTestDB, test_id)
+            if not test:
+                raise HTTPException(status_code=404, detail=f"A/B test {test_id} not found")
+            
+            return ABTest(
+                id=test.id,
+                test_name=test.test_name,
+                description=test.description,
+                model_name=test.model_name,
+                variant_a_model_id=test.variant_a_model_id,
+                variant_b_model_id=test.variant_b_model_id,
+                variant_a_deployment_id=test.variant_a_deployment_id,
+                variant_b_deployment_id=test.variant_b_deployment_id,
+                variant_a_percentage=test.variant_a_percentage,
+                variant_b_percentage=test.variant_b_percentage,
+                use_sticky_sessions=test.use_sticky_sessions,
+                status=test.status,
+                scheduled_start=test.scheduled_start,
+                scheduled_end=test.scheduled_end,
+                min_sample_size=test.min_sample_size,
+                significance_level=test.significance_level,
+                primary_metric=test.primary_metric,
+                config=test.config or {},
+                created_by=test.created_by
+            )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting A/B test: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.post("/ab-tests", response_model=ABTest, status_code=201)
@@ -88,6 +183,95 @@ async def get_ab_test_metrics(
         return metrics
     except Exception as e:
         logger.error(f"Error getting A/B test metrics: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/canary", response_model=List[CanaryDeployment])
+async def list_canary_deployments(
+    status: Optional[str] = Query(None, description="Filter by status"),
+    model_id: Optional[str] = Query(None, description="Filter by model ID"),
+    limit: int = Query(100, description="Maximum number of canaries to return")
+):
+    """List all canary deployments"""
+    try:
+        async with get_session() as session:
+            from app.models.monitoring import CanaryDeploymentDB
+            from sqlalchemy import select, desc
+            
+            stmt = select(CanaryDeploymentDB)
+            
+            if status:
+                stmt = stmt.where(CanaryDeploymentDB.status == status)
+            if model_id:
+                stmt = stmt.where(CanaryDeploymentDB.model_id == model_id)
+            
+            stmt = stmt.order_by(desc(CanaryDeploymentDB.created_at)).limit(limit)
+            result = await session.execute(stmt)
+            canaries_db = result.scalars().all()
+            
+            return [
+                CanaryDeployment(
+                    id=canary.id,
+                    deployment_name=canary.deployment_name,
+                    model_id=canary.model_id,
+                    production_deployment_id=canary.production_deployment_id,
+                    canary_deployment_id=canary.canary_deployment_id,
+                    current_traffic_percentage=canary.current_traffic_percentage,
+                    target_traffic_percentage=canary.target_traffic_percentage,
+                    rollout_step_size=canary.rollout_step_size,
+                    rollout_step_duration_minutes=canary.rollout_step_duration_minutes,
+                    max_error_rate_threshold=canary.max_error_rate_threshold,
+                    max_latency_increase_pct=canary.max_latency_increase_pct,
+                    min_health_check_duration_minutes=canary.min_health_check_duration_minutes,
+                    health_check_window_minutes=canary.health_check_window_minutes,
+                    status=canary.status,
+                    current_step=canary.current_step,
+                    total_steps=canary.total_steps,
+                    config=canary.config or {},
+                    created_by=canary.created_by
+                )
+                for canary in canaries_db
+            ]
+    except Exception as e:
+        logger.error(f"Error listing canary deployments: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/canary/{canary_id}", response_model=CanaryDeployment)
+async def get_canary_deployment(canary_id: str):
+    """Get a specific canary deployment by ID"""
+    try:
+        async with get_session() as session:
+            from app.models.monitoring import CanaryDeploymentDB
+            
+            canary = await session.get(CanaryDeploymentDB, canary_id)
+            if not canary:
+                raise HTTPException(status_code=404, detail=f"Canary deployment {canary_id} not found")
+            
+            return CanaryDeployment(
+                id=canary.id,
+                deployment_name=canary.deployment_name,
+                model_id=canary.model_id,
+                production_deployment_id=canary.production_deployment_id,
+                canary_deployment_id=canary.canary_deployment_id,
+                current_traffic_percentage=canary.current_traffic_percentage,
+                target_traffic_percentage=canary.target_traffic_percentage,
+                rollout_step_size=canary.rollout_step_size,
+                rollout_step_duration_minutes=canary.rollout_step_duration_minutes,
+                max_error_rate_threshold=canary.max_error_rate_threshold,
+                max_latency_increase_pct=canary.max_latency_increase_pct,
+                min_health_check_duration_minutes=canary.min_health_check_duration_minutes,
+                health_check_window_minutes=canary.health_check_window_minutes,
+                status=canary.status,
+                current_step=canary.current_step,
+                total_steps=canary.total_steps,
+                config=canary.config or {},
+                created_by=canary.created_by
+            )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting canary deployment: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

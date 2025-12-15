@@ -213,5 +213,102 @@ class TestABTestingAdvanced:
         mock_assign.assert_called_once()
 
 
+class TestABTestingGET:
+    """Test A/B testing GET endpoints"""
+    
+    def test_list_ab_tests(self, client, test_session):
+        """Test listing all A/B tests"""
+        from app.models.monitoring import ABTestDB
+        from datetime import datetime
+        
+        # Create test data
+        test1 = ABTestDB(
+            id="test_1",
+            test_name="test_1",
+            model_name="model_1",
+            variant_a_model_id="variant_a_1",
+            variant_b_model_id="variant_b_1",
+            variant_a_percentage=50.0,
+            variant_b_percentage=50.0,
+            status="running",
+            created_at=datetime.utcnow()
+        )
+        test2 = ABTestDB(
+            id="test_2",
+            test_name="test_2",
+            model_name="model_2",
+            variant_a_model_id="variant_a_2",
+            variant_b_model_id="variant_b_2",
+            variant_a_percentage=60.0,
+            variant_b_percentage=40.0,
+            status="draft",
+            created_at=datetime.utcnow()
+        )
+        
+        test_session.add(test1)
+        test_session.add(test2)
+        test_session.commit()
+        
+        # Test listing all
+        response = client.get("/api/v1/monitoring/ab-tests")
+        assert response.status_code == 200
+        result = response.json()
+        assert len(result) >= 2
+        test_ids = [t["id"] for t in result]
+        assert "test_1" in test_ids
+        assert "test_2" in test_ids
+        
+        # Test filtering by status
+        response = client.get("/api/v1/monitoring/ab-tests?status=running")
+        assert response.status_code == 200
+        result = response.json()
+        assert len(result) >= 1
+        assert all(t["status"] == "running" for t in result)
+        
+        # Test filtering by model_id
+        response = client.get("/api/v1/monitoring/ab-tests?model_id=variant_a_1")
+        assert response.status_code == 200
+        result = response.json()
+        assert len(result) >= 1
+        
+        # Test limit
+        response = client.get("/api/v1/monitoring/ab-tests?limit=1")
+        assert response.status_code == 200
+        result = response.json()
+        assert len(result) <= 1
+    
+    def test_get_ab_test_by_id(self, client, test_session):
+        """Test getting a specific A/B test by ID"""
+        from app.models.monitoring import ABTestDB
+        from datetime import datetime
+        
+        test = ABTestDB(
+            id="test_get_123",
+            test_name="test_get",
+            model_name="model_get",
+            variant_a_model_id="variant_a_get",
+            variant_b_model_id="variant_b_get",
+            variant_a_percentage=50.0,
+            variant_b_percentage=50.0,
+            status="running",
+            created_at=datetime.utcnow()
+        )
+        
+        test_session.add(test)
+        test_session.commit()
+        
+        # Test getting by ID
+        response = client.get("/api/v1/monitoring/ab-tests/test_get_123")
+        assert response.status_code == 200
+        result = response.json()
+        assert result["id"] == "test_get_123"
+        assert result["test_name"] == "test_get"
+        assert result["model_name"] == "model_get"
+        
+        # Test 404 for non-existent
+        response = client.get("/api/v1/monitoring/ab-tests/nonexistent")
+        assert response.status_code == 404
+
+
 
 

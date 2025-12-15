@@ -253,6 +253,75 @@ class TestAlertRules:
         result = response.json()
         assert result["id"] == "rule_123"
         mock_create.assert_called_once()
+    
+    def test_list_alert_rules(self, client, test_session):
+        """Test listing all alert rules"""
+        from app.models.monitoring import AlertRuleDB
+        from datetime import datetime
+        
+        # Create test data
+        rule1 = AlertRuleDB(
+            id="rule_1",
+            rule_name="rule_1",
+            metric_name="latency",
+            condition="gt",
+            threshold_value=1000.0,
+            severity="warning",
+            component="api_server",
+            is_active=True,
+            created_at=datetime.utcnow()
+        )
+        rule2 = AlertRuleDB(
+            id="rule_2",
+            rule_name="rule_2",
+            metric_name="error_rate",
+            condition="gt",
+            threshold_value=5.0,
+            severity="critical",
+            component="model_service",
+            model_id="model_123",
+            is_active=False,
+            created_at=datetime.utcnow()
+        )
+        
+        test_session.add(rule1)
+        test_session.add(rule2)
+        test_session.commit()
+        
+        # Test listing all
+        response = client.get("/api/v1/monitoring/alert-rules")
+        assert response.status_code == 200
+        result = response.json()
+        assert len(result) >= 2
+        rule_ids = [r["id"] for r in result]
+        assert "rule_1" in rule_ids
+        assert "rule_2" in rule_ids
+        
+        # Test filtering by is_active
+        response = client.get("/api/v1/monitoring/alert-rules?is_active=true")
+        assert response.status_code == 200
+        result = response.json()
+        assert len(result) >= 1
+        assert all(r["is_active"] is True for r in result)
+        
+        # Test filtering by model_id
+        response = client.get("/api/v1/monitoring/alert-rules?model_id=model_123")
+        assert response.status_code == 200
+        result = response.json()
+        assert len(result) >= 1
+        
+        # Test filtering by severity
+        response = client.get("/api/v1/monitoring/alert-rules?severity=critical")
+        assert response.status_code == 200
+        result = response.json()
+        assert len(result) >= 1
+        assert all(r["severity"] == "critical" for r in result)
+        
+        # Test limit
+        response = client.get("/api/v1/monitoring/alert-rules?limit=1")
+        assert response.status_code == 200
+        result = response.json()
+        assert len(result) <= 1
 
 
 

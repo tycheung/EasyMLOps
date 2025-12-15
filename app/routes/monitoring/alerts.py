@@ -132,6 +132,61 @@ async def check_and_create_alerts():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/alert-rules", response_model=List[AlertRule])
+async def list_alert_rules(
+    is_active: Optional[bool] = Query(None, description="Filter by active status"),
+    model_id: Optional[str] = Query(None, description="Filter by model ID"),
+    severity: Optional[str] = Query(None, description="Filter by severity"),
+    limit: int = Query(100, description="Maximum number of rules to return")
+):
+    """List all alert rules"""
+    try:
+        async with get_session() as session:
+            from app.models.monitoring import AlertRuleDB
+            from sqlalchemy import select, desc
+            
+            stmt = select(AlertRuleDB)
+            
+            if is_active is not None:
+                stmt = stmt.where(AlertRuleDB.is_active == is_active)
+            if model_id:
+                stmt = stmt.where(AlertRuleDB.model_id == model_id)
+            if severity:
+                stmt = stmt.where(AlertRuleDB.severity == severity)
+            
+            stmt = stmt.order_by(desc(AlertRuleDB.created_at)).limit(limit)
+            result = await session.execute(stmt)
+            rules_db = result.scalars().all()
+            
+            return [
+                AlertRule(
+                    id=rule.id,
+                    rule_name=rule.rule_name,
+                    description=rule.description,
+                    metric_name=rule.metric_name,
+                    condition=rule.condition,
+                    threshold_value=rule.threshold_value,
+                    threshold_min=rule.threshold_min,
+                    threshold_max=rule.threshold_max,
+                    severity=rule.severity,
+                    component=rule.component,
+                    min_interval_seconds=rule.min_interval_seconds,
+                    max_alerts_per_hour=rule.max_alerts_per_hour,
+                    cooldown_period_seconds=rule.cooldown_period_seconds,
+                    model_id=rule.model_id,
+                    deployment_id=rule.deployment_id,
+                    is_active=rule.is_active,
+                    last_triggered_at=rule.last_triggered_at,
+                    trigger_count=rule.trigger_count,
+                    created_by=rule.created_by
+                )
+                for rule in rules_db
+            ]
+    except Exception as e:
+        logger.error(f"Error listing alert rules: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/alert-rules", response_model=Dict[str, str], status_code=201)
 async def create_alert_rule(rule: AlertRule):
     """Create a new alert rule"""

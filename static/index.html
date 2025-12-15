@@ -477,6 +477,15 @@
                                     class="text-sm border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500">
                                 <option value="">Select a model...</option>
                             </select>
+                            <button onclick="loadResourceUsageForUI()" class="text-sm bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1 rounded" title="Resource Usage">
+                                <i class="fas fa-server mr-1"></i>Resources
+                            </button>
+                            <button onclick="loadAggregatedMetricsForUI()" class="text-sm bg-purple-600 hover:bg-purple-700 text-white px-3 py-1 rounded" title="Aggregated Metrics">
+                                <i class="fas fa-chart-line mr-1"></i>Aggregated
+                            </button>
+                            <button onclick="loadConfidenceMetricsForUI()" class="text-sm bg-yellow-600 hover:bg-yellow-700 text-white px-3 py-1 rounded" title="Confidence Metrics">
+                                <i class="fas fa-certificate mr-1"></i>Confidence
+                            </button>
                         </div>
                     </div>
                     <div class="p-6">
@@ -541,6 +550,7 @@
                             <select id="explain-method-select" class="text-sm border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500">
                                 <option value="shap">SHAP</option>
                                 <option value="lime">LIME</option>
+                                <option value="importance">Feature Importance</option>
                             </select>
                             <button onclick="generateExplanation()" class="bg-purple-600 hover:bg-purple-700 text-white px-3 py-1 rounded text-sm">
                                 <i class="fas fa-lightbulb mr-1"></i>Explain
@@ -564,7 +574,13 @@
                                 <option value="">Select a model...</option>
                             </select>
                             <button onclick="runDataQualityCheck()" class="bg-green-600 hover:bg-green-700 text-white px-3 py-1 rounded text-sm">
-                                <i class="fas fa-check-circle mr-1"></i>Check Quality
+                                <i class="fas fa-check-circle mr-1"></i>Metrics
+                            </button>
+                            <button onclick="detectOutliers()" class="bg-orange-600 hover:bg-orange-700 text-white px-3 py-1 rounded text-sm">
+                                <i class="fas fa-exclamation-triangle mr-1"></i>Outliers
+                            </button>
+                            <button onclick="detectAnomaly()" class="bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded text-sm">
+                                <i class="fas fa-bug mr-1"></i>Anomalies
                             </button>
                         </div>
                     </div>
@@ -584,8 +600,14 @@
                                     class="text-sm border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500">
                                 <option value="">Select a model...</option>
                             </select>
+                            <button onclick="configureFairnessAttributes()" class="bg-purple-600 hover:bg-purple-700 text-white px-3 py-1 rounded text-sm">
+                                <i class="fas fa-cog mr-1"></i>Configure
+                            </button>
                             <button onclick="calculateFairnessMetrics()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1 rounded text-sm">
                                 <i class="fas fa-balance-scale mr-1"></i>Calculate
+                            </button>
+                            <button onclick="getDemographicDistribution()" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded text-sm">
+                                <i class="fas fa-users mr-1"></i>Demographics
                             </button>
                         </div>
                     </div>
@@ -629,6 +651,9 @@
                             <button onclick="createBaseline()" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded text-sm">
                                 <i class="fas fa-plus mr-1"></i>Create Baseline
                             </button>
+                            <button onclick="compareModelVersions()" class="bg-purple-600 hover:bg-purple-700 text-white px-3 py-1 rounded text-sm">
+                                <i class="fas fa-code-branch mr-1"></i>Compare Versions
+                            </button>
                         </div>
                     </div>
                     <div class="p-6">
@@ -663,6 +688,26 @@
 
                 <!-- Test Interface -->
                 <div id="test-interface" class="hidden">
+                    <!-- Prediction Type Selector -->
+                    <div class="bg-white shadow rounded-lg mb-6">
+                        <div class="px-6 py-4 border-b border-gray-200">
+                            <h3 class="text-lg font-medium text-gray-900">Prediction Type</h3>
+                        </div>
+                        <div class="p-6">
+                            <div class="flex space-x-4">
+                                <button onclick="setPredictionType('single')" id="pred-type-single" class="prediction-type-btn bg-blue-600 text-white px-4 py-2 rounded">
+                                    <i class="fas fa-play mr-2"></i>Single Prediction
+                                </button>
+                                <button onclick="setPredictionType('batch')" id="pred-type-batch" class="prediction-type-btn bg-gray-200 text-gray-700 px-4 py-2 rounded hover:bg-gray-300">
+                                    <i class="fas fa-list mr-2"></i>Batch Prediction
+                                </button>
+                                <button onclick="setPredictionType('proba')" id="pred-type-proba" class="prediction-type-btn bg-gray-200 text-gray-700 px-4 py-2 rounded hover:bg-gray-300">
+                                    <i class="fas fa-percentage mr-2"></i>Probability Prediction
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
                     <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
                         <!-- Input Form -->
                         <div class="bg-white shadow rounded-lg">
@@ -670,13 +715,45 @@
                                 <h3 class="text-lg font-medium text-gray-900">Test Input</h3>
                             </div>
                             <div class="p-6">
-                                <form id="test-form">
+                                <!-- Single Prediction Form -->
+                                <form id="test-form" class="prediction-form active">
                                     <div id="test-input-fields" class="space-y-4">
                                         <!-- Dynamic test fields will be added here -->
                                     </div>
                                     <div class="mt-6 space-y-3">
                                         <button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-3 px-4 rounded-lg">
                                             <i class="fas fa-play mr-2"></i>Test Model
+                                        </button>
+                                        <button type="button" onclick="loadExampleData()" 
+                                                class="w-full bg-gray-600 hover:bg-gray-700 text-white font-medium py-2 px-4 rounded-lg">
+                                            <i class="fas fa-magic mr-2"></i>Load Example Data
+                                        </button>
+                                    </div>
+                                </form>
+
+                                <!-- Batch Prediction Form -->
+                                <form id="batch-test-form" class="prediction-form hidden">
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-700 mb-2">Batch Data (JSON Array)</label>
+                                        <textarea id="batch-test-data" rows="12" required class="w-full border-gray-300 rounded-md font-mono text-sm" 
+                                                  placeholder='[{"field1": "value1", "field2": 123}, {"field1": "value2", "field2": 456}]'></textarea>
+                                        <p class="text-xs text-gray-500 mt-1">Enter an array of input objects</p>
+                                    </div>
+                                    <div class="mt-6">
+                                        <button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-3 px-4 rounded-lg">
+                                            <i class="fas fa-list mr-2"></i>Run Batch Prediction
+                                        </button>
+                                    </div>
+                                </form>
+
+                                <!-- Probability Prediction Form -->
+                                <form id="proba-test-form" class="prediction-form hidden">
+                                    <div id="proba-input-fields" class="space-y-4">
+                                        <!-- Dynamic probability input fields will be added here -->
+                                    </div>
+                                    <div class="mt-6 space-y-3">
+                                        <button type="submit" class="w-full bg-purple-600 hover:bg-purple-700 text-white font-medium py-3 px-4 rounded-lg">
+                                            <i class="fas fa-percentage mr-2"></i>Get Probabilities
                                         </button>
                                         <button type="button" onclick="loadExampleData()" 
                                                 class="w-full bg-gray-600 hover:bg-gray-700 text-white font-medium py-2 px-4 rounded-lg">
@@ -719,6 +796,8 @@
                         <button onclick="showSchemaTab('generate')" class="schema-tab-btn border-b-2 border-transparent py-4 px-1 text-sm font-medium text-gray-500 hover:text-gray-700 hover:border-gray-300">Generate</button>
                         <button onclick="showSchemaTab('compare')" class="schema-tab-btn border-b-2 border-transparent py-4 px-1 text-sm font-medium text-gray-500 hover:text-gray-700 hover:border-gray-300">Compare</button>
                         <button onclick="showSchemaTab('convert')" class="schema-tab-btn border-b-2 border-transparent py-4 px-1 text-sm font-medium text-gray-500 hover:text-gray-700 hover:border-gray-300">Convert</button>
+                        <button onclick="showSchemaTab('manage')" class="schema-tab-btn border-b-2 border-transparent py-4 px-1 text-sm font-medium text-gray-500 hover:text-gray-700 hover:border-gray-300">Manage</button>
+                        <button onclick="showSchemaTab('versions')" class="schema-tab-btn border-b-2 border-transparent py-4 px-1 text-sm font-medium text-gray-500 hover:text-gray-700 hover:border-gray-300">Versions</button>
                     </nav>
                 </div>
 
@@ -832,6 +911,53 @@
                         </div>
                     </div>
                 </div>
+
+                <!-- Schema Management -->
+                <div id="schema-manage" class="schema-tab-content hidden">
+                    <div class="bg-white shadow rounded-lg mb-6">
+                        <div class="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
+                            <h3 class="text-lg font-medium text-gray-900">Model Schema Management</h3>
+                            <div class="flex items-center space-x-2">
+                                <select id="schema-manage-model-select" onchange="loadModelSchemas()" 
+                                        class="text-sm border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500">
+                                    <option value="">Select a model...</option>
+                                </select>
+                                <button onclick="loadCommonTemplates()" class="bg-green-600 hover:bg-green-700 text-white px-3 py-1 rounded text-sm">
+                                    <i class="fas fa-download mr-1"></i>Load Templates
+                                </button>
+                            </div>
+                        </div>
+                        <div class="p-6">
+                            <div id="model-schemas-display">
+                                <div class="text-center py-8 text-gray-500">Select a model to manage schemas</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Schema Versions -->
+                <div id="schema-versions" class="schema-tab-content hidden">
+                    <div class="bg-white shadow rounded-lg mb-6">
+                        <div class="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
+                            <h3 class="text-lg font-medium text-gray-900">Schema Versioning</h3>
+                            <div class="flex items-center space-x-2">
+                                <input type="text" id="schema-id-input" placeholder="Schema ID" 
+                                       class="text-sm border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500">
+                                <button onclick="loadSchemaVersions()" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded text-sm">
+                                    <i class="fas fa-search mr-1"></i>Load Versions
+                                </button>
+                                <button onclick="openCreateSchemaVersionModal()" class="bg-green-600 hover:bg-green-700 text-white px-3 py-1 rounded text-sm">
+                                    <i class="fas fa-plus mr-1"></i>Create Version
+                                </button>
+                            </div>
+                        </div>
+                        <div class="p-6">
+                            <div id="schema-versions-display">
+                                <div class="text-center py-8 text-gray-500">Enter a schema ID and click "Load Versions"</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
 
@@ -862,8 +988,11 @@
 
                 <!-- Selected Test Metrics -->
                 <div id="ab-test-metrics-section" class="bg-white shadow rounded-lg hidden">
-                    <div class="px-6 py-4 border-b border-gray-200">
+                    <div class="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
                         <h3 class="text-lg font-medium text-gray-900">Test Metrics</h3>
+                        <button onclick="document.getElementById('ab-test-metrics-section').classList.add('hidden')" class="text-gray-400 hover:text-gray-600">
+                            <i class="fas fa-times"></i>
+                        </button>
                     </div>
                     <div class="p-6">
                         <div id="ab-test-metrics-display"></div>
@@ -899,8 +1028,11 @@
 
                 <!-- Selected Canary Metrics -->
                 <div id="canary-metrics-section" class="bg-white shadow rounded-lg hidden">
-                    <div class="px-6 py-4 border-b border-gray-200">
+                    <div class="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
                         <h3 class="text-lg font-medium text-gray-900">Canary Metrics</h3>
+                        <button onclick="document.getElementById('canary-metrics-section').classList.add('hidden')" class="text-gray-400 hover:text-gray-600">
+                            <i class="fas fa-times"></i>
+                        </button>
                     </div>
                     <div class="p-6">
                         <div id="canary-metrics-display"></div>
@@ -1047,13 +1179,41 @@
                     <div class="bg-white shadow rounded-lg mb-6">
                         <div class="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
                             <h3 class="text-lg font-medium text-gray-900">Comparative Analytics</h3>
-                            <button onclick="openCreateComparativeModal()" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded text-sm">
+                            <button onclick="document.getElementById('create-comparative-modal').classList.remove('hidden')" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded text-sm">
                                 <i class="fas fa-plus mr-1"></i>Create Comparison
                             </button>
                         </div>
                         <div class="p-6">
-                            <div id="comparative-list">
-                                <div class="text-center py-8 text-gray-500">No comparative analytics</div>
+                            <form id="create-comparative-form" onsubmit="createComparativeAnalytics(event)" class="space-y-4">
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">Name</label>
+                                    <input type="text" id="comparative-analytics-name" required class="w-full border-gray-300 rounded-md">
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">Description</label>
+                                    <textarea id="comparative-analytics-description" rows="2" class="w-full border-gray-300 rounded-md"></textarea>
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">Models (comma-separated IDs)</label>
+                                    <input type="text" id="comparative-analytics-models" required class="w-full border-gray-300 rounded-md" placeholder="model-id-1, model-id-2">
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">Metrics (comma-separated)</label>
+                                    <input type="text" id="comparative-analytics-metrics" required class="w-full border-gray-300 rounded-md" placeholder="accuracy, latency, throughput">
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">Time Range</label>
+                                    <select id="comparative-analytics-time-range" required class="w-full border-gray-300 rounded-md">
+                                        <option value="24h">Last 24 Hours</option>
+                                        <option value="7d">Last 7 Days</option>
+                                        <option value="30d">Last 30 Days</option>
+                                        <option value="90d">Last 90 Days</option>
+                                    </select>
+                                </div>
+                                <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded">Create Comparison</button>
+                            </form>
+                            <div id="comparative-list" class="mt-4">
+                                <div class="text-center py-8 text-gray-500">Create a comparison to see results</div>
                             </div>
                         </div>
                     </div>
@@ -1404,10 +1564,1021 @@
                     <button onclick="openCreateAlertRuleModal()" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded text-sm">
                         <i class="fas fa-plus mr-1"></i>Create Rule
                     </button>
+                    <button onclick="checkAndCreateAlerts()" class="ml-2 bg-green-600 hover:bg-green-700 text-white px-3 py-1 rounded text-sm">
+                        <i class="fas fa-check mr-1"></i>Check Alerts
+                    </button>
+                    <button onclick="checkAndEscalateAlerts()" class="ml-2 bg-purple-600 hover:bg-purple-700 text-white px-3 py-1 rounded text-sm">
+                        <i class="fas fa-arrow-up mr-1"></i>Escalate
+                    </button>
                 </div>
                 <div id="alert-rules-list">
                     <div class="text-center py-8 text-gray-500">No alert rules</div>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Create Alert Rule Modal -->
+    <div id="create-alert-rule-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
+        <div class="bg-white rounded-lg max-w-2xl w-full mx-4">
+            <div class="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
+                <h3 class="text-lg font-medium text-gray-900">Create Alert Rule</h3>
+                <button onclick="closeCreateAlertRuleModal()" class="text-gray-400 hover:text-gray-600">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="p-6">
+                <form id="create-alert-rule-form" onsubmit="submitCreateAlertRule(event)" class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Rule Name</label>
+                        <input type="text" id="alert-rule-name" required class="w-full border-gray-300 rounded-md">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Description</label>
+                        <textarea id="alert-rule-description" rows="2" class="w-full border-gray-300 rounded-md"></textarea>
+                    </div>
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Metric</label>
+                            <input type="text" id="alert-rule-metric" required class="w-full border-gray-300 rounded-md" placeholder="error_rate">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Operator</label>
+                            <select id="alert-rule-operator" required class="w-full border-gray-300 rounded-md">
+                                <option value="gt">Greater Than</option>
+                                <option value="lt">Less Than</option>
+                                <option value="eq">Equals</option>
+                                <option value="gte">Greater Than or Equal</option>
+                                <option value="lte">Less Than or Equal</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Threshold</label>
+                            <input type="number" id="alert-rule-threshold" required step="0.01" class="w-full border-gray-300 rounded-md">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Severity</label>
+                            <select id="alert-rule-severity" required class="w-full border-gray-300 rounded-md">
+                                <option value="low">Low</option>
+                                <option value="medium">Medium</option>
+                                <option value="high">High</option>
+                                <option value="critical">Critical</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Model ID (optional)</label>
+                        <input type="text" id="alert-rule-model-id" class="w-full border-gray-300 rounded-md">
+                    </div>
+                    <div class="flex items-center">
+                        <input type="checkbox" id="alert-rule-enabled" checked class="mr-2">
+                        <label class="text-sm text-gray-700">Enabled</label>
+                    </div>
+                    <div class="flex justify-end space-x-3 mt-6">
+                        <button type="button" onclick="closeCreateAlertRuleModal()" class="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50">Cancel</button>
+                        <button type="submit" class="px-4 py-2 text-sm font-medium text-white bg-blue-600 border border-transparent rounded-md hover:bg-blue-700">Create</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Create Notification Channel Modal -->
+    <div id="create-notification-channel-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
+        <div class="bg-white rounded-lg max-w-2xl w-full mx-4">
+            <div class="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
+                <h3 class="text-lg font-medium text-gray-900">Create Notification Channel</h3>
+                <button onclick="closeCreateNotificationChannelModal()" class="text-gray-400 hover:text-gray-600">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="p-6">
+                <form id="create-notification-channel-form" onsubmit="submitCreateNotificationChannel(event)" class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Channel Name</label>
+                        <input type="text" id="notification-channel-name" required class="w-full border-gray-300 rounded-md">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Channel Type</label>
+                        <select id="notification-channel-type" required class="w-full border-gray-300 rounded-md">
+                            <option value="email">Email</option>
+                            <option value="slack">Slack</option>
+                            <option value="webhook">Webhook</option>
+                            <option value="sms">SMS</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Configuration (JSON)</label>
+                        <textarea id="notification-channel-config" rows="6" required class="w-full border-gray-300 rounded-md font-mono text-sm" 
+                                  placeholder='{"email": "admin@example.com"}'></textarea>
+                    </div>
+                    <div class="flex justify-end space-x-3 mt-6">
+                        <button type="button" onclick="closeCreateNotificationChannelModal()" class="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50">Cancel</button>
+                        <button type="submit" class="px-4 py-2 text-sm font-medium text-white bg-blue-600 border border-transparent rounded-md hover:bg-blue-700">Create</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Create Alert Escalation Modal -->
+    <div id="create-alert-escalation-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
+        <div class="bg-white rounded-lg max-w-2xl w-full mx-4">
+            <div class="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
+                <h3 class="text-lg font-medium text-gray-900">Create Alert Escalation</h3>
+                <button onclick="closeCreateAlertEscalationModal()" class="text-gray-400 hover:text-gray-600">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="p-6">
+                <form id="create-escalation-form" onsubmit="submitCreateAlertEscalation(event)" class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Escalation Name</label>
+                        <input type="text" id="escalation-name" required class="w-full border-gray-300 rounded-md">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Rules (JSON)</label>
+                        <textarea id="escalation-rules" rows="4" required class="w-full border-gray-300 rounded-md font-mono text-sm" 
+                                  placeholder='[{"condition": "...", "action": "..."}]'></textarea>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Actions (JSON)</label>
+                        <textarea id="escalation-actions" rows="4" required class="w-full border-gray-300 rounded-md font-mono text-sm" 
+                                  placeholder='[{"type": "notify", "target": "..."}]'></textarea>
+                    </div>
+                    <div class="flex justify-end space-x-3 mt-6">
+                        <button type="button" onclick="closeCreateAlertEscalationModal()" class="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50">Cancel</button>
+                        <button type="submit" class="px-4 py-2 text-sm font-medium text-white bg-purple-600 border border-transparent rounded-md hover:bg-purple-700">Create</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Update Deployment Modal -->
+    <div id="update-deployment-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
+        <div class="bg-white rounded-lg max-w-2xl w-full mx-4">
+            <div class="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
+                <h3 class="text-lg font-medium text-gray-900">Update Deployment</h3>
+                <button onclick="closeUpdateDeploymentModal()" class="text-gray-400 hover:text-gray-600">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="p-6">
+                <form id="update-deployment-form" onsubmit="submitUpdateDeployment(event)" class="space-y-4">
+                    <input type="hidden" id="update-deployment-id">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Deployment Name</label>
+                        <input type="text" id="update-deployment-name" required class="w-full border-gray-300 rounded-md">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Description</label>
+                        <textarea id="update-deployment-description" rows="3" class="w-full border-gray-300 rounded-md"></textarea>
+                    </div>
+                    <div class="flex justify-end space-x-3 mt-6">
+                        <button type="button" onclick="closeUpdateDeploymentModal()" class="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50">Cancel</button>
+                        <button type="submit" class="px-4 py-2 text-sm font-medium text-white bg-blue-600 border border-transparent rounded-md hover:bg-blue-700">Update</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Deployment Status Modal -->
+    <div id="deployment-status-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
+        <div class="bg-white rounded-lg max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto">
+            <div class="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
+                <h3 class="text-lg font-medium text-gray-900">Deployment Status</h3>
+                <button onclick="closeDeploymentStatusModal()" class="text-gray-400 hover:text-gray-600">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="p-6">
+                <div id="deployment-status-content"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Deployment Metrics Modal -->
+    <div id="deployment-metrics-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
+        <div class="bg-white rounded-lg max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto">
+            <div class="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
+                <h3 class="text-lg font-medium text-gray-900">Deployment Metrics</h3>
+                <button onclick="closeDeploymentMetricsModal()" class="text-gray-400 hover:text-gray-600">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="p-6">
+                <div id="deployment-metrics-content"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Deployment Test Modal -->
+    <div id="deployment-test-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
+        <div class="bg-white rounded-lg max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto">
+            <div class="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
+                <h3 class="text-lg font-medium text-gray-900">Test Deployment: <span id="deployment-test-deployment-name"></span></h3>
+                <button onclick="closeDeploymentTestModal()" class="text-gray-400 hover:text-gray-600">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="p-6">
+                <form id="deployment-test-form" onsubmit="submitDeploymentTest(event)" class="space-y-4">
+                    <input type="hidden" id="deployment-test-deployment-id">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Test Data (JSON)</label>
+                        <textarea id="deployment-test-data" rows="8" required class="w-full border-gray-300 rounded-md font-mono text-sm" 
+                                  placeholder='{"data": [1, 2, 3, 4]}'></textarea>
+                    </div>
+                    <button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded">Run Test</button>
+                </form>
+                <div id="deployment-test-result" class="mt-4"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Update Model Modal -->
+    <div id="update-model-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
+        <div class="bg-white rounded-lg max-w-2xl w-full mx-4">
+            <div class="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
+                <h3 class="text-lg font-medium text-gray-900">Update Model</h3>
+                <button onclick="closeUpdateModelModal()" class="text-gray-400 hover:text-gray-600">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="p-6">
+                <form id="update-model-form" onsubmit="submitUpdateModel(event)" class="space-y-4">
+                    <input type="hidden" id="update-model-id">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Model Name</label>
+                        <input type="text" id="update-model-name" required class="w-full border-gray-300 rounded-md">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Description</label>
+                        <textarea id="update-model-description" rows="3" class="w-full border-gray-300 rounded-md"></textarea>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Version</label>
+                        <input type="text" id="update-model-version" class="w-full border-gray-300 rounded-md" placeholder="1.0.0">
+                    </div>
+                    <div class="flex justify-end space-x-3 mt-6">
+                        <button type="button" onclick="closeUpdateModelModal()" class="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50">Cancel</button>
+                        <button type="submit" class="px-4 py-2 text-sm font-medium text-white bg-blue-600 border border-transparent rounded-md hover:bg-blue-700">Update</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Model Metrics Modal -->
+    <div id="model-metrics-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
+        <div class="bg-white rounded-lg max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto">
+            <div class="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
+                <h3 class="text-lg font-medium text-gray-900">Model Metrics</h3>
+                <button onclick="closeModelMetricsModal()" class="text-gray-400 hover:text-gray-600">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="p-6">
+                <div id="model-metrics-content"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- A/B Test Details Modal -->
+    <div id="ab-test-details-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
+        <div class="bg-white rounded-lg max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto">
+            <div class="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
+                <h3 class="text-lg font-medium text-gray-900">A/B Test Details</h3>
+                <button onclick="closeABTestDetailsModal()" class="text-gray-400 hover:text-gray-600">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="p-6">
+                <div id="ab-test-details-content"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Canary Details Modal -->
+    <div id="canary-details-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
+        <div class="bg-white rounded-lg max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto">
+            <div class="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
+                <h3 class="text-lg font-medium text-gray-900">Canary Deployment Details</h3>
+                <button onclick="closeCanaryDetailsModal()" class="text-gray-400 hover:text-gray-600">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="p-6">
+                <div id="canary-details-content"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Canary Health Modal -->
+    <div id="canary-health-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
+        <div class="bg-white rounded-lg max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto">
+            <div class="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
+                <h3 class="text-lg font-medium text-gray-900">Canary Health Status</h3>
+                <button onclick="closeCanaryHealthModal()" class="text-gray-400 hover:text-gray-600">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="p-6">
+                <div id="canary-health-content"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Fairness Attributes Modal -->
+    <div id="fairness-attributes-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
+        <div class="bg-white rounded-lg max-w-2xl w-full mx-4">
+            <div class="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
+                <h3 class="text-lg font-medium text-gray-900">Configure Fairness Attributes</h3>
+                <button onclick="closeFairnessAttributesModal()" class="text-gray-400 hover:text-gray-600">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="p-6">
+                <form id="fairness-attributes-form" onsubmit="submitFairnessAttributes(event)" class="space-y-4">
+                    <input type="hidden" id="fairness-attributes-model-id">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Protected Attributes (comma-separated)</label>
+                        <input type="text" id="fairness-protected-attributes" class="w-full border-gray-300 rounded-md" 
+                               placeholder="age, gender, race">
+                        <p class="text-xs text-gray-500 mt-1">Enter attribute names separated by commas</p>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Sensitive Groups (comma-separated)</label>
+                        <input type="text" id="fairness-sensitive-groups" class="w-full border-gray-300 rounded-md" 
+                               placeholder="group1, group2">
+                        <p class="text-xs text-gray-500 mt-1">Enter sensitive group names separated by commas</p>
+                    </div>
+                    <div class="flex justify-end space-x-3 mt-6">
+                        <button type="button" onclick="closeFairnessAttributesModal()" class="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50">Cancel</button>
+                        <button type="submit" class="px-4 py-2 text-sm font-medium text-white bg-indigo-600 border border-transparent rounded-md hover:bg-indigo-700">Configure</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Degradation Log Modal -->
+    <div id="degradation-log-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
+        <div class="bg-white rounded-lg max-w-2xl w-full mx-4">
+            <div class="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
+                <h3 class="text-lg font-medium text-gray-900">Log Prediction with Ground Truth</h3>
+                <button onclick="closeDegradationLogModal()" class="text-gray-400 hover:text-gray-600">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="p-6">
+                <form id="degradation-log-form" onsubmit="submitDegradationLog(event)" class="space-y-4">
+                    <input type="hidden" id="degradation-log-model-id">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Prediction ID</label>
+                        <input type="text" id="degradation-prediction-id" required class="w-full border-gray-300 rounded-md">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Ground Truth (JSON)</label>
+                        <textarea id="degradation-ground-truth" rows="4" required class="w-full border-gray-300 rounded-md font-mono text-sm" 
+                                  placeholder='{"label": "value"}'></textarea>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Prediction (JSON)</label>
+                        <textarea id="degradation-prediction" rows="4" required class="w-full border-gray-300 rounded-md font-mono text-sm" 
+                                  placeholder='{"prediction": "value"}'></textarea>
+                    </div>
+                    <div class="flex justify-end space-x-3 mt-6">
+                        <button type="button" onclick="closeDegradationLogModal()" class="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50">Cancel</button>
+                        <button type="submit" class="px-4 py-2 text-sm font-medium text-white bg-blue-600 border border-transparent rounded-md hover:bg-blue-700">Log</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Version Comparison Modal -->
+    <div id="version-comparison-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
+        <div class="bg-white rounded-lg max-w-2xl w-full mx-4">
+            <div class="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
+                <h3 class="text-lg font-medium text-gray-900">Compare Model Versions</h3>
+                <button onclick="closeVersionComparisonModal()" class="text-gray-400 hover:text-gray-600">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="p-6">
+                <form id="version-comparison-form" onsubmit="submitVersionComparison(event)" class="space-y-4">
+                    <input type="hidden" id="version-comparison-model-id">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Version A ID</label>
+                        <input type="text" id="version-a-id" required class="w-full border-gray-300 rounded-md">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Version B ID</label>
+                        <input type="text" id="version-b-id" required class="w-full border-gray-300 rounded-md">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Start Time</label>
+                        <input type="datetime-local" id="comparison-start-time" required class="w-full border-gray-300 rounded-md">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">End Time</label>
+                        <input type="datetime-local" id="comparison-end-time" required class="w-full border-gray-300 rounded-md">
+                    </div>
+                    <div class="flex justify-end space-x-3 mt-6">
+                        <button type="button" onclick="closeVersionComparisonModal()" class="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50">Cancel</button>
+                        <button type="submit" class="px-4 py-2 text-sm font-medium text-white bg-purple-600 border border-transparent rounded-md hover:bg-purple-700">Compare</button>
+                    </div>
+                </form>
+                <div id="version-comparison-result" class="mt-4"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Schema Management Modals -->
+    <div id="openapi-schema-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
+        <div class="bg-white rounded-lg max-w-4xl w-full mx-4 max-h-[90vh] overflow-y-auto">
+            <div class="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
+                <h3 class="text-lg font-medium text-gray-900">OpenAPI Schema</h3>
+                <button onclick="closeOpenAPISchemaModal()" class="text-gray-400 hover:text-gray-600">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="p-6">
+                <div id="openapi-schema-content"></div>
+            </div>
+        </div>
+    </div>
+
+    <div id="update-model-schema-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
+        <div class="bg-white rounded-lg max-w-2xl w-full mx-4">
+            <div class="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
+                <h3 class="text-lg font-medium text-gray-900">Update Model Schema</h3>
+                <button onclick="closeUpdateModelSchemaModal()" class="text-gray-400 hover:text-gray-600">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="p-6">
+                <form id="update-model-schema-form" onsubmit="submitUpdateModelSchema(event)" class="space-y-4">
+                    <input type="hidden" id="update-model-schema-model-id">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Schema Type</label>
+                        <select id="update-schema-type" required class="w-full border-gray-300 rounded-md">
+                            <option value="input">Input Schema</option>
+                            <option value="output">Output Schema</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Schema Data (JSON)</label>
+                        <textarea id="update-schema-data" rows="10" required class="w-full border-gray-300 rounded-md font-mono text-sm"></textarea>
+                    </div>
+                    <div class="flex justify-end space-x-3 mt-6">
+                        <button type="button" onclick="closeUpdateModelSchemaModal()" class="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50">Cancel</button>
+                        <button type="submit" class="px-4 py-2 text-sm font-medium text-white bg-blue-600 border border-transparent rounded-md hover:bg-blue-700">Update</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <div id="create-schema-version-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
+        <div class="bg-white rounded-lg max-w-2xl w-full mx-4">
+            <div class="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
+                <h3 class="text-lg font-medium text-gray-900">Create Schema Version</h3>
+                <button onclick="closeCreateSchemaVersionModal()" class="text-gray-400 hover:text-gray-600">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="p-6">
+                <form id="create-schema-version-form" onsubmit="submitCreateSchemaVersion(event)" class="space-y-4">
+                    <input type="hidden" id="create-version-schema-id">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Version</label>
+                        <input type="text" id="create-version-version" required class="w-full border-gray-300 rounded-md" placeholder="1.0.1">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Description</label>
+                        <textarea id="create-version-description" rows="3" class="w-full border-gray-300 rounded-md"></textarea>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Schema Data (JSON)</label>
+                        <textarea id="create-version-schema-data" rows="10" required class="w-full border-gray-300 rounded-md font-mono text-sm"></textarea>
+                    </div>
+                    <div class="flex justify-end space-x-3 mt-6">
+                        <button type="button" onclick="closeCreateSchemaVersionModal()" class="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50">Cancel</button>
+                        <button type="submit" class="px-4 py-2 text-sm font-medium text-white bg-green-600 border border-transparent rounded-md hover:bg-green-700">Create</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <div id="schema-version-view-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
+        <div class="bg-white rounded-lg max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto">
+            <div class="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
+                <h3 class="text-lg font-medium text-gray-900">Schema Version</h3>
+                <button onclick="closeSchemaVersionViewModal()" class="text-gray-400 hover:text-gray-600">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="p-6">
+                <div id="schema-version-view-content"></div>
+            </div>
+        </div>
+    </div>
+
+    <div id="update-schema-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
+        <div class="bg-white rounded-lg max-w-2xl w-full mx-4">
+            <div class="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
+                <h3 class="text-lg font-medium text-gray-900">Update Schema</h3>
+                <button onclick="closeUpdateSchemaModal()" class="text-gray-400 hover:text-gray-600">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="p-6">
+                <form id="update-schema-form" onsubmit="submitUpdateSchema(event)" class="space-y-4">
+                    <input type="hidden" id="update-schema-id">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Version (optional)</label>
+                        <input type="text" id="update-schema-version" class="w-full border-gray-300 rounded-md">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Schema Data (JSON)</label>
+                        <textarea id="update-schema-data-input" rows="10" required class="w-full border-gray-300 rounded-md font-mono text-sm"></textarea>
+                    </div>
+                    <div class="flex justify-end space-x-3 mt-6">
+                        <button type="button" onclick="closeUpdateSchemaModal()" class="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50">Cancel</button>
+                        <button type="submit" class="px-4 py-2 text-sm font-medium text-white bg-yellow-600 border border-transparent rounded-md hover:bg-yellow-700">Update</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Governance Modals -->
+    <div id="create-lineage-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
+        <div class="bg-white rounded-lg max-w-2xl w-full mx-4">
+            <div class="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
+                <h3 class="text-lg font-medium text-gray-900">Create Data Lineage</h3>
+                <button onclick="closeCreateLineageModal()" class="text-gray-400 hover:text-gray-600">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="p-6">
+                <form id="create-lineage-form" onsubmit="submitCreateLineage(event)" class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Lineage Type</label>
+                        <select id="lineage-type" required class="w-full border-gray-300 rounded-md">
+                            <option value="data">Data</option>
+                            <option value="model">Model</option>
+                            <option value="deployment">Deployment</option>
+                        </select>
+                    </div>
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Source ID</label>
+                            <input type="text" id="lineage-source-id" required class="w-full border-gray-300 rounded-md">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Source Type</label>
+                            <input type="text" id="lineage-source-type" required class="w-full border-gray-300 rounded-md">
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Target ID</label>
+                            <input type="text" id="lineage-target-id" required class="w-full border-gray-300 rounded-md">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Target Type</label>
+                            <input type="text" id="lineage-target-type" required class="w-full border-gray-300 rounded-md">
+                        </div>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Relationship Type</label>
+                        <input type="text" id="lineage-relationship-type" required class="w-full border-gray-300 rounded-md" placeholder="derived_from">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Source Metadata (JSON)</label>
+                        <textarea id="lineage-source-metadata" rows="3" class="w-full border-gray-300 rounded-md font-mono text-sm" placeholder='{}'></textarea>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Target Metadata (JSON)</label>
+                        <textarea id="lineage-target-metadata" rows="3" class="w-full border-gray-300 rounded-md font-mono text-sm" placeholder='{}'></textarea>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Relationship Metadata (JSON)</label>
+                        <textarea id="lineage-relationship-metadata" rows="3" class="w-full border-gray-300 rounded-md font-mono text-sm" placeholder='{}'></textarea>
+                    </div>
+                    <div class="flex justify-end space-x-3 mt-6">
+                        <button type="button" onclick="closeCreateLineageModal()" class="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50">Cancel</button>
+                        <button type="submit" class="px-4 py-2 text-sm font-medium text-white bg-blue-600 border border-transparent rounded-md hover:bg-blue-700">Create</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <div id="create-workflow-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
+        <div class="bg-white rounded-lg max-w-2xl w-full mx-4">
+            <div class="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
+                <h3 class="text-lg font-medium text-gray-900">Create Governance Workflow</h3>
+                <button onclick="closeCreateWorkflowModal()" class="text-gray-400 hover:text-gray-600">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="p-6">
+                <form id="create-workflow-form" onsubmit="submitCreateWorkflow(event)" class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Workflow Type</label>
+                        <select id="workflow-type" required class="w-full border-gray-300 rounded-md">
+                            <option value="approval">Approval</option>
+                            <option value="validation">Validation</option>
+                            <option value="deployment">Deployment</option>
+                        </select>
+                    </div>
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Resource Type</label>
+                            <input type="text" id="workflow-resource-type" required class="w-full border-gray-300 rounded-md">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Resource ID</label>
+                            <input type="text" id="workflow-resource-id" required class="w-full border-gray-300 rounded-md">
+                        </div>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Request Data (JSON)</label>
+                        <textarea id="workflow-request-data" rows="4" class="w-full border-gray-300 rounded-md font-mono text-sm" placeholder='{}'></textarea>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Policy Checks (JSON Array)</label>
+                        <textarea id="workflow-policy-checks" rows="4" class="w-full border-gray-300 rounded-md font-mono text-sm" placeholder='[]'></textarea>
+                    </div>
+                    <div class="flex justify-end space-x-3 mt-6">
+                        <button type="button" onclick="closeCreateWorkflowModal()" class="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50">Cancel</button>
+                        <button type="submit" class="px-4 py-2 text-sm font-medium text-white bg-blue-600 border border-transparent rounded-md hover:bg-blue-700">Create</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <div id="create-compliance-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
+        <div class="bg-white rounded-lg max-w-2xl w-full mx-4">
+            <div class="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
+                <h3 class="text-lg font-medium text-gray-900">Create Compliance Record</h3>
+                <button onclick="closeCreateComplianceModal()" class="text-gray-400 hover:text-gray-600">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="p-6">
+                <form id="create-compliance-form" onsubmit="submitCreateCompliance(event)" class="space-y-4">
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Compliance Type</label>
+                            <select id="compliance-type" required class="w-full border-gray-300 rounded-md">
+                                <option value="gdpr">GDPR</option>
+                                <option value="hipaa">HIPAA</option>
+                                <option value="ccpa">CCPA</option>
+                                <option value="sox">SOX</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Record Type</label>
+                            <select id="compliance-record-type" required class="w-full border-gray-300 rounded-md">
+                                <option value="access">Access</option>
+                                <option value="deletion">Deletion</option>
+                                <option value="modification">Modification</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Subject ID</label>
+                            <input type="text" id="compliance-subject-id" class="w-full border-gray-300 rounded-md">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Subject Type</label>
+                            <input type="text" id="compliance-subject-type" class="w-full border-gray-300 rounded-md">
+                        </div>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Description</label>
+                        <textarea id="compliance-description" rows="3" required class="w-full border-gray-300 rounded-md"></textarea>
+                    </div>
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Request ID</label>
+                            <input type="text" id="compliance-request-id" class="w-full border-gray-300 rounded-md">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Requested By</label>
+                            <input type="text" id="compliance-requested-by" class="w-full border-gray-300 rounded-md">
+                        </div>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Data Scope</label>
+                        <input type="text" id="compliance-data-scope" class="w-full border-gray-300 rounded-md">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Additional Data (JSON)</label>
+                        <textarea id="compliance-additional-data" rows="3" class="w-full border-gray-300 rounded-md font-mono text-sm" placeholder='{}'></textarea>
+                    </div>
+                    <div class="flex justify-end space-x-3 mt-6">
+                        <button type="button" onclick="closeCreateComplianceModal()" class="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50">Cancel</button>
+                        <button type="submit" class="px-4 py-2 text-sm font-medium text-white bg-blue-600 border border-transparent rounded-md hover:bg-blue-700">Create</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <div id="create-retention-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
+        <div class="bg-white rounded-lg max-w-2xl w-full mx-4">
+            <div class="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
+                <h3 class="text-lg font-medium text-gray-900">Create Data Retention Policy</h3>
+                <button onclick="closeCreateRetentionModal()" class="text-gray-400 hover:text-gray-600">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="p-6">
+                <form id="create-retention-form" onsubmit="submitCreateRetentionPolicy(event)" class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Policy Name</label>
+                        <input type="text" id="retention-policy-name" required class="w-full border-gray-300 rounded-md">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Policy Description</label>
+                        <textarea id="retention-policy-description" rows="2" class="w-full border-gray-300 rounded-md"></textarea>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Resource Type</label>
+                        <select id="retention-resource-type" required class="w-full border-gray-300 rounded-md">
+                            <option value="model">Model</option>
+                            <option value="deployment">Deployment</option>
+                            <option value="prediction">Prediction</option>
+                        </select>
+                    </div>
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Model ID (optional)</label>
+                            <input type="text" id="retention-model-id" class="w-full border-gray-300 rounded-md">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Deployment ID (optional)</label>
+                            <input type="text" id="retention-deployment-id" class="w-full border-gray-300 rounded-md">
+                        </div>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Retention Period (days)</label>
+                        <input type="number" id="retention-period-days" required class="w-full border-gray-300 rounded-md">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Retention Condition</label>
+                        <textarea id="retention-condition" rows="2" class="w-full border-gray-300 rounded-md"></textarea>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Action on Expiry</label>
+                        <select id="retention-action" required class="w-full border-gray-300 rounded-md">
+                            <option value="delete">Delete</option>
+                            <option value="archive">Archive</option>
+                            <option value="notify">Notify</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Archive Location</label>
+                        <input type="text" id="retention-archive-location" class="w-full border-gray-300 rounded-md">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Created By</label>
+                        <input type="text" id="retention-created-by" class="w-full border-gray-300 rounded-md">
+                    </div>
+                    <div class="flex justify-end space-x-3 mt-6">
+                        <button type="button" onclick="closeCreateRetentionModal()" class="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50">Cancel</button>
+                        <button type="submit" class="px-4 py-2 text-sm font-medium text-white bg-blue-600 border border-transparent rounded-md hover:bg-blue-700">Create</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Analytics Modals -->
+    <div id="create-dashboard-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
+        <div class="bg-white rounded-lg max-w-2xl w-full mx-4">
+            <div class="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
+                <h3 class="text-lg font-medium text-gray-900">Create Analytics Dashboard</h3>
+                <button onclick="closeCreateDashboardModal()" class="text-gray-400 hover:text-gray-600">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="p-6">
+                <form id="create-dashboard-form" onsubmit="submitCreateDashboard(event)" class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Dashboard Name</label>
+                        <input type="text" id="dashboard-name" required class="w-full border-gray-300 rounded-md">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Description</label>
+                        <textarea id="dashboard-description" rows="2" class="w-full border-gray-300 rounded-md"></textarea>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Widgets (JSON Array)</label>
+                        <textarea id="dashboard-widgets" rows="6" class="w-full border-gray-300 rounded-md font-mono text-sm" placeholder='[]'></textarea>
+                    </div>
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Layout</label>
+                            <select id="dashboard-layout" class="w-full border-gray-300 rounded-md">
+                                <option value="grid">Grid</option>
+                                <option value="list">List</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Refresh Interval (seconds)</label>
+                            <input type="number" id="dashboard-refresh-interval" value="60" class="w-full border-gray-300 rounded-md">
+                        </div>
+                    </div>
+                    <div class="flex justify-end space-x-3 mt-6">
+                        <button type="button" onclick="closeCreateDashboardModal()" class="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50">Cancel</button>
+                        <button type="submit" class="px-4 py-2 text-sm font-medium text-white bg-blue-600 border border-transparent rounded-md hover:bg-blue-700">Create</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <div id="create-report-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
+        <div class="bg-white rounded-lg max-w-2xl w-full mx-4">
+            <div class="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
+                <h3 class="text-lg font-medium text-gray-900">Create Analytics Report</h3>
+                <button onclick="closeCreateReportModal()" class="text-gray-400 hover:text-gray-600">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="p-6">
+                <form id="create-report-form" onsubmit="submitCreateReport(event)" class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Report Name</label>
+                        <input type="text" id="report-name" required class="w-full border-gray-300 rounded-md">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Description</label>
+                        <textarea id="report-description" rows="2" class="w-full border-gray-300 rounded-md"></textarea>
+                    </div>
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Report Type</label>
+                            <select id="report-type" required class="w-full border-gray-300 rounded-md">
+                                <option value="performance">Performance</option>
+                                <option value="usage">Usage</option>
+                                <option value="compliance">Compliance</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Format</label>
+                            <select id="report-format" required class="w-full border-gray-300 rounded-md">
+                                <option value="pdf">PDF</option>
+                                <option value="csv">CSV</option>
+                                <option value="json">JSON</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Schedule (cron)</label>
+                        <input type="text" id="report-schedule" class="w-full border-gray-300 rounded-md" placeholder="0 0 * * *">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Recipients (comma-separated)</label>
+                        <input type="text" id="report-recipients" class="w-full border-gray-300 rounded-md" placeholder="email1@example.com, email2@example.com">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Metrics (JSON Array)</label>
+                        <textarea id="report-metrics" rows="4" class="w-full border-gray-300 rounded-md font-mono text-sm" placeholder='[]'></textarea>
+                    </div>
+                    <div class="flex justify-end space-x-3 mt-6">
+                        <button type="button" onclick="closeCreateReportModal()" class="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50">Cancel</button>
+                        <button type="submit" class="px-4 py-2 text-sm font-medium text-white bg-blue-600 border border-transparent rounded-md hover:bg-blue-700">Create</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Integration Modals -->
+    <div id="create-integration-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
+        <div class="bg-white rounded-lg max-w-2xl w-full mx-4">
+            <div class="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
+                <h3 class="text-lg font-medium text-gray-900">Create Integration</h3>
+                <button onclick="closeCreateIntegrationModal()" class="text-gray-400 hover:text-gray-600">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="p-6">
+                <form id="create-integration-form" onsubmit="submitCreateIntegration(event)" class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Integration Name</label>
+                        <input type="text" id="integration-name" required class="w-full border-gray-300 rounded-md">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Integration Type</label>
+                        <select id="integration-type" required class="w-full border-gray-300 rounded-md">
+                            <option value="datadog">Datadog</option>
+                            <option value="prometheus">Prometheus</option>
+                            <option value="splunk">Splunk</option>
+                            <option value="custom">Custom</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Configuration (JSON)</label>
+                        <textarea id="integration-config" rows="6" required class="w-full border-gray-300 rounded-md font-mono text-sm" placeholder='{"api_key": "..."}'></textarea>
+                    </div>
+                    <div class="flex items-center">
+                        <input type="checkbox" id="integration-enabled" checked class="mr-2">
+                        <label class="text-sm text-gray-700">Enabled</label>
+                    </div>
+                    <div class="flex justify-end space-x-3 mt-6">
+                        <button type="button" onclick="closeCreateIntegrationModal()" class="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50">Cancel</button>
+                        <button type="submit" class="px-4 py-2 text-sm font-medium text-white bg-blue-600 border border-transparent rounded-md hover:bg-blue-700">Create</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <div id="create-webhook-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
+        <div class="bg-white rounded-lg max-w-2xl w-full mx-4">
+            <div class="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
+                <h3 class="text-lg font-medium text-gray-900">Create Webhook</h3>
+                <button onclick="closeCreateWebhookModal()" class="text-gray-400 hover:text-gray-600">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="p-6">
+                <form id="create-webhook-form" onsubmit="submitCreateWebhook(event)" class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Webhook URL</label>
+                        <input type="url" id="webhook-url" required class="w-full border-gray-300 rounded-md" placeholder="https://example.com/webhook">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Events (comma-separated)</label>
+                        <input type="text" id="webhook-events" required class="w-full border-gray-300 rounded-md" placeholder="alert.created, deployment.started">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Secret</label>
+                        <input type="text" id="webhook-secret" class="w-full border-gray-300 rounded-md">
+                    </div>
+                    <div class="flex items-center">
+                        <input type="checkbox" id="webhook-enabled" checked class="mr-2">
+                        <label class="text-sm text-gray-700">Enabled</label>
+                    </div>
+                    <div class="flex justify-end space-x-3 mt-6">
+                        <button type="button" onclick="closeCreateWebhookModal()" class="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50">Cancel</button>
+                        <button type="submit" class="px-4 py-2 text-sm font-medium text-white bg-blue-600 border border-transparent rounded-md hover:bg-blue-700">Create</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Retraining Modal -->
+    <div id="create-retraining-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
+        <div class="bg-white rounded-lg max-w-2xl w-full mx-4">
+            <div class="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
+                <h3 class="text-lg font-medium text-gray-900">Create Retraining Job</h3>
+                <button onclick="closeCreateRetrainingModal()" class="text-gray-400 hover:text-gray-600">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="p-6">
+                <form id="create-retraining-form" onsubmit="submitCreateRetrainingJob(event)" class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Model ID</label>
+                        <select id="retraining-model-id" required class="w-full border-gray-300 rounded-md">
+                            <option value="">Select a model...</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Training Data Path</label>
+                        <input type="text" id="retraining-data-path" required class="w-full border-gray-300 rounded-md" placeholder="/path/to/training/data">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Hyperparameters (JSON)</label>
+                        <textarea id="retraining-hyperparameters" rows="4" class="w-full border-gray-300 rounded-md font-mono text-sm" placeholder='{"learning_rate": 0.01}'></textarea>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Description</label>
+                        <textarea id="retraining-description" rows="2" class="w-full border-gray-300 rounded-md"></textarea>
+                    </div>
+                    <div class="flex justify-end space-x-3 mt-6">
+                        <button type="button" onclick="closeCreateRetrainingModal()" class="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50">Cancel</button>
+                        <button type="submit" class="px-4 py-2 text-sm font-medium text-white bg-blue-600 border border-transparent rounded-md hover:bg-blue-700">Create</button>
+                    </div>
+                </form>
             </div>
         </div>
     </div>

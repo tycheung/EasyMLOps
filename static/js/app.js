@@ -1012,13 +1012,22 @@ function renderModelsList(models) {
                     ${model.description ? `<p class="mt-2 text-gray-600">${model.description}</p>` : ''}
                 </div>
                 <div class="flex items-center space-x-2">
-                    <button onclick="viewModelDetails('${model.id}')" class="text-blue-600 hover:text-blue-800">
+                    <button onclick="viewModelDetails('${model.id}')" class="text-blue-600 hover:text-blue-800" title="View Details">
                         <i class="fas fa-eye"></i>
                     </button>
-                    <button onclick="deployModel('${model.id}')" class="text-green-600 hover:text-green-800">
+                    <button onclick="openUpdateModelModal('${model.id}')" class="text-yellow-600 hover:text-yellow-800" title="Edit">
+                        <i class="fas fa-edit"></i>
+                    </button>
+                    <button onclick="validateModel('${model.id}')" class="text-purple-600 hover:text-purple-800" title="Validate">
+                        <i class="fas fa-check-circle"></i>
+                    </button>
+                    <button onclick="getModelMetrics('${model.id}')" class="text-indigo-600 hover:text-indigo-800" title="Metrics">
+                        <i class="fas fa-chart-bar"></i>
+                    </button>
+                    <button onclick="deployModel('${model.id}')" class="text-green-600 hover:text-green-800" title="Deploy">
                         <i class="fas fa-rocket"></i>
                     </button>
-                    <button onclick="deleteModel('${model.id}')" class="text-red-600 hover:text-red-800">
+                    <button onclick="deleteModel('${model.id}')" class="text-red-600 hover:text-red-800" title="Delete">
                         <i class="fas fa-trash"></i>
                     </button>
                 </div>
@@ -1069,7 +1078,114 @@ async function deleteModel(modelId) {
         
     } catch (error) {
         console.error('Delete error:', error);
+        showNotification('Failed to delete model: ' + (error.message || 'Unknown error'), 'error');
     }
+}
+
+// Model Update Functions
+async function openUpdateModelModal(modelId) {
+    try {
+        const model = await apiCall(`/models/${modelId}`);
+        const modal = document.getElementById('update-model-modal');
+        if (modal) {
+            document.getElementById('update-model-id').value = modelId;
+            document.getElementById('update-model-name').value = model.model.name || '';
+            document.getElementById('update-model-description').value = model.model.description || '';
+            document.getElementById('update-model-version').value = model.model.version || '1.0.0';
+            modal.classList.remove('hidden');
+        } else {
+            showNotification('Update modal not found', 'error');
+        }
+    } catch (error) {
+        console.error('Error loading model:', error);
+        showNotification('Failed to load model: ' + (error.message || 'Unknown error'), 'error');
+    }
+}
+
+function closeUpdateModelModal() {
+    document.getElementById('update-model-modal').classList.add('hidden');
+}
+
+async function submitUpdateModel(e) {
+    e.preventDefault();
+    const modelId = document.getElementById('update-model-id').value;
+    const updateData = {
+        name: document.getElementById('update-model-name').value,
+        description: document.getElementById('update-model-description').value,
+        version: document.getElementById('update-model-version').value
+    };
+    
+    try {
+        await apiCall(`/models/${modelId}`, {
+            method: 'PUT',
+            body: JSON.stringify(updateData)
+        });
+        
+        showNotification('Model updated successfully', 'success');
+        closeUpdateModelModal();
+        loadModels();
+    } catch (error) {
+        console.error('Error updating model:', error);
+        showNotification('Failed to update model: ' + (error.message || 'Unknown error'), 'error');
+    }
+}
+
+async function validateModel(modelId) {
+    try {
+        const result = await apiCall(`/models/${modelId}/validate`, {
+            method: 'POST'
+        });
+        
+        showNotification(`Model validation: ${result.valid ? 'Valid' : 'Invalid'}`, result.valid ? 'success' : 'error');
+        if (result.valid) {
+            loadModels(); // Refresh to show updated status
+        }
+    } catch (error) {
+        console.error('Error validating model:', error);
+        showNotification('Failed to validate model: ' + (error.message || 'Unknown error'), 'error');
+    }
+}
+
+async function getModelMetrics(modelId) {
+    try {
+        const metrics = await apiCall(`/models/${modelId}/metrics`);
+        
+        const metricsModal = document.getElementById('model-metrics-modal');
+        if (metricsModal) {
+            document.getElementById('model-metrics-content').innerHTML = `
+                <div class="space-y-4">
+                    <div class="grid grid-cols-3 gap-4">
+                        <div class="bg-blue-50 p-4 rounded">
+                            <div class="text-sm text-gray-600">Total Predictions</div>
+                            <div class="text-2xl font-bold text-blue-600">${metrics.total_predictions || 0}</div>
+                        </div>
+                        <div class="bg-green-50 p-4 rounded">
+                            <div class="text-sm text-gray-600">Success Rate</div>
+                            <div class="text-2xl font-bold text-green-600">${((metrics.success_rate || 0) * 100).toFixed(1)}%</div>
+                        </div>
+                        <div class="bg-purple-50 p-4 rounded">
+                            <div class="text-sm text-gray-600">Avg Response Time</div>
+                            <div class="text-2xl font-bold text-purple-600">${Math.round(metrics.avg_response_time_ms || 0)}ms</div>
+                        </div>
+                    </div>
+                    <div class="bg-gray-50 border border-gray-200 rounded-lg p-4">
+                        <h4 class="font-medium text-gray-800 mb-2">Full Metrics</h4>
+                        <pre class="text-xs bg-white p-3 rounded overflow-x-auto">${JSON.stringify(metrics, null, 2)}</pre>
+                    </div>
+                </div>
+            `;
+            metricsModal.classList.remove('hidden');
+        } else {
+            showNotification(`Metrics: ${metrics.total_predictions || 0} predictions`, 'info');
+        }
+    } catch (error) {
+        console.error('Error getting model metrics:', error);
+        showNotification('Failed to get model metrics: ' + (error.message || 'Unknown error'), 'error');
+    }
+}
+
+function closeModelMetricsModal() {
+    document.getElementById('model-metrics-modal').classList.add('hidden');
 }
 
 // Deployments Management
@@ -1101,9 +1217,9 @@ function renderDeploymentsList(deployments) {
         <div class="border-b border-gray-200 py-4 last:border-b-0">
             <div class="flex items-center justify-between">
                 <div class="flex-1">
-                    <h4 class="text-lg font-medium text-gray-900">${deployment.service_name}</h4>
+                    <h4 class="text-lg font-medium text-gray-900">${deployment.service_name || deployment.deployment_name || 'Unnamed Deployment'}</h4>
                     <div class="mt-1 flex items-center space-x-4 text-sm text-gray-500">
-                        <span><i class="fas fa-server mr-1"></i>${deployment.framework}</span>
+                        <span><i class="fas fa-server mr-1"></i>${deployment.framework || 'N/A'}</span>
                         <span><i class="fas fa-calendar mr-1"></i>${new Date(deployment.created_at).toLocaleDateString()}</span>
                         <span class="px-2 py-1 rounded-full text-xs ${getDeploymentStatusClass(deployment.status)}">${deployment.status}</span>
                     </div>
@@ -1113,16 +1229,38 @@ function renderDeploymentsList(deployments) {
                             <code class="ml-1 text-xs bg-gray-100 px-2 py-1 rounded">${deployment.endpoint_url}</code>
                         </div>
                     ` : ''}
+                    ${deployment.description ? `<p class="mt-2 text-sm text-gray-600">${deployment.description}</p>` : ''}
                 </div>
                 <div class="flex items-center space-x-2">
-                    <button onclick="testDeployment('${deployment.id}')" class="text-blue-600 hover:text-blue-800">
+                    <button onclick="getDeploymentStatus('${deployment.id}')" class="text-purple-600 hover:text-purple-800" title="Status">
+                        <i class="fas fa-info-circle"></i>
+                    </button>
+                    <button onclick="getDeploymentMetrics('${deployment.id}')" class="text-indigo-600 hover:text-indigo-800" title="Metrics">
+                        <i class="fas fa-chart-bar"></i>
+                    </button>
+                    <button onclick="testDeploymentEndpoint('${deployment.id}')" class="text-blue-600 hover:text-blue-800" title="Test">
+                        <i class="fas fa-vial"></i>
+                    </button>
+                    <button onclick="testDeployment('${deployment.id}')" class="text-blue-600 hover:text-blue-800" title="Quick Test">
                         <i class="fas fa-play"></i>
                     </button>
-                    <button onclick="viewDeploymentLogs('${deployment.id}')" class="text-gray-600 hover:text-gray-800">
+                    ${deployment.status === 'stopped' ? `
+                        <button onclick="startDeployment('${deployment.id}')" class="text-green-600 hover:text-green-800" title="Start">
+                            <i class="fas fa-play-circle"></i>
+                        </button>
+                    ` : `
+                        <button onclick="stopDeployment('${deployment.id}')" class="text-red-600 hover:text-red-800" title="Stop">
+                            <i class="fas fa-stop"></i>
+                        </button>
+                    `}
+                    <button onclick="openUpdateDeploymentModal('${deployment.id}')" class="text-yellow-600 hover:text-yellow-800" title="Edit">
+                        <i class="fas fa-edit"></i>
+                    </button>
+                    <button onclick="viewDeploymentLogs('${deployment.id}')" class="text-gray-600 hover:text-gray-800" title="Logs">
                         <i class="fas fa-file-alt"></i>
                     </button>
-                    <button onclick="stopDeployment('${deployment.id}')" class="text-red-600 hover:text-red-800">
-                        <i class="fas fa-stop"></i>
+                    <button onclick="deleteDeployment('${deployment.id}')" class="text-red-600 hover:text-red-800" title="Delete">
+                        <i class="fas fa-trash"></i>
                     </button>
                 </div>
             </div>
@@ -1183,12 +1321,50 @@ async function loadTestInterface() {
         const schema = await apiCall(`/predict/${deploymentId}/schema`);
         
         renderTestForm(schema);
+        renderProbaForm(schema);
         document.getElementById('test-interface').classList.remove('hidden');
+        setPredictionType('single'); // Reset to single prediction
         
     } catch (error) {
         console.error('Error loading test interface:', error);
         showNotification('Failed to load test interface', 'error');
     }
+}
+
+function renderProbaForm(schema) {
+    const container = document.getElementById('proba-input-fields');
+    
+    if (!schema.input_schema || !schema.input_schema.fields) {
+        container.innerHTML = `
+            <div class="text-center py-4 text-gray-500">
+                <p>No input schema defined for this model</p>
+                <p class="text-sm mt-1">You can still test with custom JSON data</p>
+            </div>
+            <textarea id="custom-json-input-proba" class="w-full border-gray-300 rounded-md mt-4" rows="6" 
+                      placeholder='{"data": [1, 2, 3, 4]}'></textarea>
+        `;
+        return;
+    }
+    
+    container.innerHTML = schema.input_schema.fields.map(field => {
+        const inputType = getInputType(field.data_type);
+        return `
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">
+                    ${field.name}
+                    ${field.required ? '<span class="text-red-500">*</span>' : ''}
+                </label>
+                <input type="${inputType}" 
+                       name="${field.name}" 
+                       class="w-full border-gray-300 rounded-md"
+                       ${field.required ? 'required' : ''}
+                       ${field.min_value !== undefined ? `min="${field.min_value}"` : ''}
+                       ${field.max_value !== undefined ? `max="${field.max_value}"` : ''}
+                       placeholder="${field.description || field.name}">
+                ${field.description ? `<p class="text-xs text-gray-500 mt-1">${field.description}</p>` : ''}
+            </div>
+        `;
+    }).join('');
 }
 
 function renderTestForm(schema) {
@@ -1238,6 +1414,33 @@ function getInputType(dataType) {
     }
 }
 
+// Prediction Type Management
+let currentPredictionType = 'single';
+
+function setPredictionType(type) {
+    currentPredictionType = type;
+    
+    // Update button styles
+    document.querySelectorAll('.prediction-type-btn').forEach(btn => {
+        btn.classList.remove('bg-blue-600', 'text-white');
+        btn.classList.add('bg-gray-200', 'text-gray-700');
+    });
+    document.getElementById(`pred-type-${type}`).classList.remove('bg-gray-200', 'text-gray-700');
+    document.getElementById(`pred-type-${type}`).classList.add('bg-blue-600', 'text-white');
+    
+    // Show/hide forms
+    document.querySelectorAll('.prediction-form').forEach(form => form.classList.add('hidden'));
+    document.getElementById(`${type === 'single' ? 'test' : type === 'batch' ? 'batch-test' : 'proba-test'}-form`).classList.remove('hidden');
+    
+    // Clear results
+    document.getElementById('test-results').innerHTML = `
+        <div class="text-center py-8 text-gray-500">
+            <i class="fas fa-chart-bar text-4xl mb-4"></i>
+            <p>Run a test to see results</p>
+        </div>
+    `;
+}
+
 async function handleModelTest(e) {
     e.preventDefault();
     
@@ -1285,6 +1488,176 @@ async function handleModelTest(e) {
             </div>
         `;
     }
+}
+
+async function handleBatchTest(e) {
+    e.preventDefault();
+    
+    const testSelect = document.getElementById('test-model-select');
+    const deploymentId = testSelect.value;
+    
+    if (!deploymentId) {
+        showNotification('Please select a model to test', 'error');
+        return;
+    }
+    
+    try {
+        const batchData = JSON.parse(document.getElementById('batch-test-data').value);
+        
+        if (!Array.isArray(batchData)) {
+            throw new Error('Batch data must be an array');
+        }
+        
+        const result = await apiCall(`/predict/${deploymentId}/batch`, {
+            method: 'POST',
+            body: JSON.stringify({ data: batchData })
+        });
+        
+        displayBatchTestResults(result);
+        
+    } catch (error) {
+        console.error('Batch test error:', error);
+        document.getElementById('test-results').innerHTML = `
+            <div class="text-center py-8 text-red-500">
+                <i class="fas fa-exclamation-triangle text-4xl mb-4"></i>
+                <p>Batch test failed</p>
+                <p class="text-sm mt-2">${error.message}</p>
+            </div>
+        `;
+    }
+}
+
+function displayBatchTestResults(result) {
+    const container = document.getElementById('test-results');
+    
+    container.innerHTML = `
+        <div class="space-y-4">
+            <div class="bg-green-50 border border-green-200 rounded-lg p-4">
+                <h4 class="font-medium text-green-800 mb-2">
+                    <i class="fas fa-check-circle mr-2"></i>Batch Prediction Successful
+                </h4>
+                <div class="text-sm text-green-700">
+                    <p><strong>Total Predictions:</strong> ${result.predictions ? result.predictions.length : 0}</p>
+                </div>
+            </div>
+            
+            <div class="bg-gray-50 border border-gray-200 rounded-lg p-4">
+                <h4 class="font-medium text-gray-800 mb-2">Batch Results</h4>
+                <div class="max-h-96 overflow-y-auto">
+                    <table class="min-w-full text-xs">
+                        <thead class="bg-gray-100">
+                            <tr>
+                                <th class="px-2 py-1 text-left">Index</th>
+                                <th class="px-2 py-1 text-left">Prediction</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${result.predictions ? result.predictions.map((pred, idx) => `
+                                <tr class="border-b">
+                                    <td class="px-2 py-1">${idx + 1}</td>
+                                    <td class="px-2 py-1 font-mono">${JSON.stringify(pred).substring(0, 100)}${JSON.stringify(pred).length > 100 ? '...' : ''}</td>
+                                </tr>
+                            `).join('') : '<tr><td colspan="2" class="px-2 py-1 text-center text-gray-500">No predictions</td></tr>'}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            
+            <div class="bg-gray-50 border border-gray-200 rounded-lg p-4">
+                <h4 class="font-medium text-gray-800 mb-2">Full Response</h4>
+                <pre class="text-xs bg-white p-3 rounded overflow-x-auto">${JSON.stringify(result, null, 2)}</pre>
+            </div>
+        </div>
+    `;
+}
+
+async function handleProbaTest(e) {
+    e.preventDefault();
+    
+    const testSelect = document.getElementById('test-model-select');
+    const deploymentId = testSelect.value;
+    
+    if (!deploymentId) {
+        showNotification('Please select a model to test', 'error');
+        return;
+    }
+    
+    try {
+        // Collect test data
+        let testData;
+        const customJsonInput = document.getElementById('custom-json-input');
+        
+        if (customJsonInput && customJsonInput.value) {
+            testData = JSON.parse(customJsonInput.value);
+        } else {
+            // Collect form data
+            const formData = new FormData(e.target);
+            testData = {};
+            
+            for (const [key, value] of formData.entries()) {
+                testData[key] = value;
+            }
+        }
+        
+        // Make probability prediction
+        const result = await apiCall(`/predict/${deploymentId}/proba`, {
+            method: 'POST',
+            body: JSON.stringify({ data: testData })
+        });
+        
+        displayProbaTestResults(result);
+        
+    } catch (error) {
+        console.error('Probability test error:', error);
+        document.getElementById('test-results').innerHTML = `
+            <div class="text-center py-8 text-red-500">
+                <i class="fas fa-exclamation-triangle text-4xl mb-4"></i>
+                <p>Probability test failed</p>
+                <p class="text-sm mt-2">${error.message}</p>
+            </div>
+        `;
+    }
+}
+
+function displayProbaTestResults(result) {
+    const container = document.getElementById('test-results');
+    
+    container.innerHTML = `
+        <div class="space-y-4">
+            <div class="bg-purple-50 border border-purple-200 rounded-lg p-4">
+                <h4 class="font-medium text-purple-800 mb-2">
+                    <i class="fas fa-percentage mr-2"></i>Probability Prediction Successful
+                </h4>
+            </div>
+            
+            ${result.probabilities ? `
+                <div class="bg-gray-50 border border-gray-200 rounded-lg p-4">
+                    <h4 class="font-medium text-gray-800 mb-2">Class Probabilities</h4>
+                    <div class="space-y-2">
+                        ${Array.isArray(result.probabilities) ? 
+                            result.probabilities.map((prob, idx) => `
+                                <div class="flex items-center justify-between bg-white p-2 rounded">
+                                    <span class="text-sm">Class ${idx}:</span>
+                                    <span class="font-mono text-sm">${(prob * 100).toFixed(2)}%</span>
+                                </div>
+                            `).join('') :
+                            Object.entries(result.probabilities).map(([class_name, prob]) => `
+                                <div class="flex items-center justify-between bg-white p-2 rounded">
+                                    <span class="text-sm">${class_name}:</span>
+                                    <span class="font-mono text-sm">${(prob * 100).toFixed(2)}%</span>
+                                </div>
+                            `).join('')
+                        }
+                    </div>
+                </div>
+            ` : ''}
+            
+            <div class="bg-gray-50 border border-gray-200 rounded-lg p-4">
+                <h4 class="font-medium text-gray-800 mb-2">Full Response</h4>
+                <pre class="text-xs bg-white p-3 rounded overflow-x-auto">${JSON.stringify(result, null, 2)}</pre>
+            </div>
+        </div>
+    `;
 }
 
 function displayTestResults(result) {
@@ -1368,6 +1741,20 @@ function viewDeploymentLogs(deploymentId) {
     showNotification('Deployment logs view not implemented yet', 'info');
 }
 
+// Deployment Management Functions
+async function startDeployment(deploymentId) {
+    try {
+        await apiCall(`/deployments/${deploymentId}/start`, {
+            method: 'POST'
+        });
+        showNotification('Deployment started successfully', 'success');
+        loadDeployments();
+    } catch (error) {
+        console.error('Error starting deployment:', error);
+        showNotification('Failed to start deployment: ' + (error.message || 'Unknown error'), 'error');
+    }
+}
+
 async function stopDeployment(deploymentId) {
     if (!confirm('Are you sure you want to stop this deployment?')) {
         return;
@@ -1383,7 +1770,202 @@ async function stopDeployment(deploymentId) {
         
     } catch (error) {
         console.error('Error stopping deployment:', error);
+        showNotification('Failed to stop deployment: ' + (error.message || 'Unknown error'), 'error');
     }
+}
+
+async function deleteDeployment(deploymentId) {
+    if (!confirm('Are you sure you want to delete this deployment? This action cannot be undone.')) {
+        return;
+    }
+    
+    try {
+        await apiCall(`/deployments/${deploymentId}`, {
+            method: 'DELETE'
+        });
+        
+        showNotification('Deployment deleted successfully', 'success');
+        loadDeployments();
+        
+    } catch (error) {
+        console.error('Error deleting deployment:', error);
+        showNotification('Failed to delete deployment: ' + (error.message || 'Unknown error'), 'error');
+    }
+}
+
+async function getDeploymentStatus(deploymentId) {
+    try {
+        const status = await apiCall(`/deployments/${deploymentId}/status`);
+        
+        // Show status in a modal or notification
+        const statusModal = document.getElementById('deployment-status-modal');
+        if (statusModal) {
+            document.getElementById('deployment-status-content').innerHTML = `
+                <div class="space-y-4">
+                    <div class="bg-${status.status === 'active' ? 'green' : 'yellow'}-50 border border-${status.status === 'active' ? 'green' : 'yellow'}-200 rounded-lg p-4">
+                        <h4 class="font-medium text-${status.status === 'active' ? 'green' : 'yellow'}-800 mb-2">Status: ${status.status}</h4>
+                        ${status.service_health ? `<p class="text-sm text-${status.status === 'active' ? 'green' : 'yellow'}-700">Service Health: ${status.service_health}</p>` : ''}
+                    </div>
+                    <div class="bg-gray-50 border border-gray-200 rounded-lg p-4">
+                        <h4 class="font-medium text-gray-800 mb-2">Details</h4>
+                        <pre class="text-xs bg-white p-3 rounded overflow-x-auto">${JSON.stringify(status, null, 2)}</pre>
+                    </div>
+                </div>
+            `;
+            statusModal.classList.remove('hidden');
+        } else {
+            showNotification(`Deployment Status: ${status.status}`, 'info');
+        }
+    } catch (error) {
+        console.error('Error getting deployment status:', error);
+        showNotification('Failed to get deployment status: ' + (error.message || 'Unknown error'), 'error');
+    }
+}
+
+async function getDeploymentMetrics(deploymentId) {
+    try {
+        const metrics = await apiCall(`/deployments/${deploymentId}/metrics`);
+        
+        // Show metrics in a modal
+        const metricsModal = document.getElementById('deployment-metrics-modal');
+        if (metricsModal) {
+            document.getElementById('deployment-metrics-content').innerHTML = `
+                <div class="space-y-4">
+                    <div class="grid grid-cols-3 gap-4">
+                        <div class="bg-blue-50 p-4 rounded">
+                            <div class="text-sm text-gray-600">Total Requests</div>
+                            <div class="text-2xl font-bold text-blue-600">${metrics.total_requests || 0}</div>
+                        </div>
+                        <div class="bg-green-50 p-4 rounded">
+                            <div class="text-sm text-gray-600">Success Rate</div>
+                            <div class="text-2xl font-bold text-green-600">${((metrics.success_rate || 0) * 100).toFixed(1)}%</div>
+                        </div>
+                        <div class="bg-purple-50 p-4 rounded">
+                            <div class="text-sm text-gray-600">Avg Latency</div>
+                            <div class="text-2xl font-bold text-purple-600">${Math.round(metrics.avg_latency_ms || 0)}ms</div>
+                        </div>
+                    </div>
+                    <div class="bg-gray-50 border border-gray-200 rounded-lg p-4">
+                        <h4 class="font-medium text-gray-800 mb-2">Full Metrics</h4>
+                        <pre class="text-xs bg-white p-3 rounded overflow-x-auto">${JSON.stringify(metrics, null, 2)}</pre>
+                    </div>
+                </div>
+            `;
+            metricsModal.classList.remove('hidden');
+        } else {
+            showNotification(`Metrics loaded: ${metrics.total_requests || 0} requests`, 'info');
+        }
+    } catch (error) {
+        console.error('Error getting deployment metrics:', error);
+        showNotification('Failed to get deployment metrics: ' + (error.message || 'Unknown error'), 'error');
+    }
+}
+
+async function testDeploymentEndpoint(deploymentId) {
+    try {
+        // Get deployment to show test interface
+        const deployment = await apiCall(`/deployments/${deploymentId}`);
+        
+        // Open test modal with deployment info
+        const testModal = document.getElementById('deployment-test-modal');
+        if (testModal) {
+            document.getElementById('deployment-test-deployment-id').value = deploymentId;
+            document.getElementById('deployment-test-deployment-name').textContent = deployment.service_name || deployment.deployment_name || 'Deployment';
+            testModal.classList.remove('hidden');
+        } else {
+            // Fallback: switch to test tab
+            testDeployment(deploymentId);
+        }
+    } catch (error) {
+        console.error('Error testing deployment:', error);
+        showNotification('Failed to test deployment: ' + (error.message || 'Unknown error'), 'error');
+    }
+}
+
+async function submitDeploymentTest(e) {
+    e.preventDefault();
+    const deploymentId = document.getElementById('deployment-test-deployment-id').value;
+    const testDataInput = document.getElementById('deployment-test-data').value;
+    
+    try {
+        const testData = JSON.parse(testDataInput);
+        const result = await apiCall(`/deployments/${deploymentId}/test`, {
+            method: 'POST',
+            body: JSON.stringify(testData)
+        });
+        
+        document.getElementById('deployment-test-result').innerHTML = `
+            <div class="bg-green-50 border border-green-200 rounded-lg p-4">
+                <h4 class="font-medium text-green-800 mb-2">Test Successful</h4>
+                <pre class="text-xs bg-white p-3 rounded overflow-x-auto">${JSON.stringify(result, null, 2)}</pre>
+            </div>
+        `;
+    } catch (error) {
+        document.getElementById('deployment-test-result').innerHTML = `
+            <div class="bg-red-50 border border-red-200 rounded-lg p-4">
+                <h4 class="font-medium text-red-800 mb-2">Test Failed</h4>
+                <p class="text-sm text-red-700">${error.message || 'Unknown error'}</p>
+            </div>
+        `;
+    }
+}
+
+function openUpdateDeploymentModal(deploymentId) {
+    // Load deployment data and show update modal
+    apiCall(`/deployments/${deploymentId}`).then(deployment => {
+        const modal = document.getElementById('update-deployment-modal');
+        if (modal) {
+            document.getElementById('update-deployment-id').value = deploymentId;
+            document.getElementById('update-deployment-name').value = deployment.deployment_name || deployment.service_name || '';
+            document.getElementById('update-deployment-description').value = deployment.description || '';
+            modal.classList.remove('hidden');
+        } else {
+            showNotification('Update modal not found', 'error');
+        }
+    }).catch(error => {
+        console.error('Error loading deployment:', error);
+        showNotification('Failed to load deployment: ' + (error.message || 'Unknown error'), 'error');
+    });
+}
+
+function closeUpdateDeploymentModal() {
+    document.getElementById('update-deployment-modal').classList.add('hidden');
+}
+
+async function submitUpdateDeployment(e) {
+    e.preventDefault();
+    const deploymentId = document.getElementById('update-deployment-id').value;
+    const updateData = {
+        deployment_name: document.getElementById('update-deployment-name').value,
+        description: document.getElementById('update-deployment-description').value
+    };
+    
+    try {
+        await apiCall(`/deployments/${deploymentId}`, {
+            method: 'PATCH',
+            body: JSON.stringify(updateData)
+        });
+        
+        showNotification('Deployment updated successfully', 'success');
+        closeUpdateDeploymentModal();
+        loadDeployments();
+    } catch (error) {
+        console.error('Error updating deployment:', error);
+        showNotification('Failed to update deployment: ' + (error.message || 'Unknown error'), 'error');
+    }
+}
+
+function closeDeploymentStatusModal() {
+    document.getElementById('deployment-status-modal').classList.add('hidden');
+}
+
+function closeDeploymentMetricsModal() {
+    document.getElementById('deployment-metrics-modal').classList.add('hidden');
+}
+
+function closeDeploymentTestModal() {
+    document.getElementById('deployment-test-modal').classList.add('hidden');
+    document.getElementById('deployment-test-result').innerHTML = '';
 }
 
 // Export functions for global access
@@ -1737,6 +2319,214 @@ async function runDriftDetection() {
     const drift = await detectDrift(modelId, driftType);
     if (drift) {
         renderDriftResults(drift, driftType);
+        // Also load drift history after detection
+        loadDriftHistory(modelId);
+    }
+}
+
+async function loadDriftHistory(modelId) {
+    try {
+        const history = await apiCall(`/monitoring/models/${modelId}/drift`);
+        renderDriftHistory(history);
+    } catch (error) {
+        console.error('Error loading drift history:', error);
+        // Don't show error if endpoint doesn't exist yet
+    }
+}
+
+function renderDriftHistory(history) {
+    const container = document.getElementById('drift-display');
+    if (!history || history.length === 0) {
+        return; // Keep existing drift results
+    }
+    
+    // Add history section below current results
+    const historyHTML = `
+        <div class="mt-4 bg-gray-50 border border-gray-200 rounded-lg p-4">
+            <h4 class="font-medium text-gray-800 mb-2">Drift History</h4>
+            <div class="space-y-2 max-h-64 overflow-y-auto">
+                ${history.map(drift => `
+                    <div class="border rounded p-2 bg-white">
+                        <div class="flex justify-between items-center">
+                            <div>
+                                <p class="text-sm font-medium">${drift.drift_type || 'Unknown'} Drift</p>
+                                <p class="text-xs text-gray-500">${new Date(drift.detected_at || drift.created_at).toLocaleString()}</p>
+                            </div>
+                            <span class="px-2 py-1 rounded text-xs ${drift.drift_detected ? 'bg-red-100 text-red-800' : 'bg-green-100 text-green-800'}">
+                                ${drift.drift_detected ? 'Detected' : 'No Drift'}
+                            </span>
+                        </div>
+                        ${drift.drift_score !== undefined ? `
+                            <p class="text-xs text-gray-600 mt-1">Score: ${drift.drift_score.toFixed(3)}</p>
+                        ` : ''}
+                    </div>
+                `).join('')}
+            </div>
+        </div>
+    `;
+    
+    container.insertAdjacentHTML('beforeend', historyHTML);
+}
+
+async function getFeatureImportance(modelId) {
+    try {
+        const importance = await apiCall(`/monitoring/models/${modelId}/explain/importance`);
+        
+        const container = document.getElementById('explainability-display');
+        container.innerHTML = `
+            <div class="space-y-4">
+                <div class="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                    <h4 class="font-medium text-blue-800 mb-2">Global Feature Importance</h4>
+                    <div class="space-y-2">
+                        ${Object.entries(importance.feature_importance || importance).sort((a, b) => b[1] - a[1]).map(([feature, score]) => `
+                            <div class="flex items-center justify-between bg-white p-2 rounded">
+                                <span class="text-sm">${feature}</span>
+                                <div class="flex items-center space-x-2">
+                                    <div class="w-32 bg-gray-200 rounded-full h-2">
+                                        <div class="bg-blue-600 h-2 rounded-full" style="width: ${(Math.abs(score) * 100)}%"></div>
+                                    </div>
+                                    <span class="text-sm font-mono">${(score * 100).toFixed(2)}%</span>
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+                <div class="bg-gray-50 border border-gray-200 rounded-lg p-4">
+                    <h4 class="font-medium text-gray-800 mb-2">Full Data</h4>
+                    <pre class="text-xs bg-white p-3 rounded overflow-x-auto">${JSON.stringify(importance, null, 2)}</pre>
+                </div>
+            </div>
+        `;
+    } catch (error) {
+        console.error('Error getting feature importance:', error);
+        showNotification('Failed to get feature importance: ' + (error.message || 'Unknown error'), 'error');
+    }
+}
+
+async function loadResourceUsageForUI() {
+    const modelId = document.getElementById('performance-model-select').value;
+    if (!modelId) {
+        showNotification('Please select a model', 'error');
+        return;
+    }
+    
+    try {
+        const usage = await loadResourceUsage(modelId);
+        if (usage) {
+            const container = document.getElementById('performance-metrics-display');
+            const existingHTML = container.innerHTML;
+            container.innerHTML = existingHTML + `
+                <div class="mt-4 bg-gray-50 border border-gray-200 rounded-lg p-4">
+                    <h4 class="font-medium text-gray-800 mb-2">Resource Usage</h4>
+                    <div class="grid grid-cols-3 gap-4">
+                        <div class="bg-blue-50 p-3 rounded">
+                            <div class="text-xs text-gray-600">CPU Usage</div>
+                            <div class="text-xl font-bold text-blue-600">${(usage.cpu_usage || 0).toFixed(1)}%</div>
+                        </div>
+                        <div class="bg-green-50 p-3 rounded">
+                            <div class="text-xs text-gray-600">Memory Usage</div>
+                            <div class="text-xl font-bold text-green-600">${(usage.memory_usage_mb || 0).toFixed(0)} MB</div>
+                        </div>
+                        <div class="bg-purple-50 p-3 rounded">
+                            <div class="text-xs text-gray-600">GPU Usage</div>
+                            <div class="text-xl font-bold text-purple-600">${(usage.gpu_usage || 0).toFixed(1)}%</div>
+                        </div>
+                    </div>
+                    <div class="mt-2 bg-white p-3 rounded">
+                        <pre class="text-xs overflow-x-auto">${JSON.stringify(usage, null, 2)}</pre>
+                    </div>
+                </div>
+            `;
+        }
+    } catch (error) {
+        console.error('Error loading resource usage:', error);
+    }
+}
+
+async function loadAggregatedMetricsForUI() {
+    const modelId = document.getElementById('performance-model-select').value;
+    if (!modelId) {
+        showNotification('Please select a model', 'error');
+        return;
+    }
+    
+    try {
+        const metrics = await loadAggregatedMetrics(modelId, '24h');
+        if (metrics) {
+            const container = document.getElementById('performance-metrics-display');
+            const existingHTML = container.innerHTML;
+            container.innerHTML = existingHTML + `
+                <div class="mt-4 bg-indigo-50 border border-indigo-200 rounded-lg p-4">
+                    <h4 class="font-medium text-indigo-800 mb-2">Aggregated Metrics (24h)</h4>
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <div class="text-xs text-gray-600">Total Requests</div>
+                            <div class="text-xl font-bold text-indigo-600">${metrics.total_requests || 0}</div>
+                        </div>
+                        <div>
+                            <div class="text-xs text-gray-600">Avg Response Time</div>
+                            <div class="text-xl font-bold text-indigo-600">${Math.round(metrics.avg_response_time_ms || 0)}ms</div>
+                        </div>
+                    </div>
+                    <div class="mt-2 bg-white p-3 rounded">
+                        <pre class="text-xs overflow-x-auto">${JSON.stringify(metrics, null, 2)}</pre>
+                    </div>
+                </div>
+            `;
+        }
+    } catch (error) {
+        console.error('Error loading aggregated metrics:', error);
+    }
+}
+
+async function loadDeploymentSummaryForUI(deploymentId) {
+    try {
+        const summary = await loadDeploymentSummary(deploymentId);
+        if (summary) {
+            // Show in deployment details or modal
+            showNotification(`Deployment Summary: ${summary.total_predictions || 0} predictions`, 'info');
+        }
+    } catch (error) {
+        console.error('Error loading deployment summary:', error);
+    }
+}
+
+async function loadConfidenceMetricsForUI() {
+    const modelId = document.getElementById('performance-model-select').value;
+    if (!modelId) {
+        showNotification('Please select a model', 'error');
+        return;
+    }
+    
+    try {
+        const endTime = new Date();
+        const startTime = new Date(endTime.getTime() - 24 * 60 * 60 * 1000);
+        const metrics = await loadConfidenceMetrics(modelId, startTime, endTime);
+        
+        if (metrics) {
+            const container = document.getElementById('performance-metrics-display');
+            const existingHTML = container.innerHTML;
+            container.innerHTML = existingHTML + `
+                <div class="mt-4 bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+                    <h4 class="font-medium text-yellow-800 mb-2">Confidence Metrics (24h)</h4>
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <div class="text-xs text-gray-600">Avg Confidence</div>
+                            <div class="text-xl font-bold text-yellow-600">${((metrics.avg_confidence || 0) * 100).toFixed(1)}%</div>
+                        </div>
+                        <div>
+                            <div class="text-xs text-gray-600">Low Confidence Count</div>
+                            <div class="text-xl font-bold text-yellow-600">${metrics.low_confidence_count || 0}</div>
+                        </div>
+                    </div>
+                    <div class="mt-2 bg-white p-3 rounded">
+                        <pre class="text-xs overflow-x-auto">${JSON.stringify(metrics, null, 2)}</pre>
+                    </div>
+                </div>
+            `;
+        }
+    } catch (error) {
+        console.error('Error loading confidence metrics:', error);
     }
 }
 
@@ -1933,13 +2723,47 @@ function showSchemaTab(tabName) {
         btn.classList.add('border-transparent', 'text-gray-500');
     });
     
-    document.getElementById(`schema-${tabName}`).classList.remove('hidden');
-    event.target.classList.remove('border-transparent', 'text-gray-500');
-    event.target.classList.add('border-blue-500', 'text-blue-600');
+    const tabElement = document.getElementById(`schema-${tabName}`);
+    if (tabElement) {
+        tabElement.classList.remove('hidden');
+    }
+    
+    if (event && event.target) {
+        event.target.classList.remove('border-transparent', 'text-gray-500');
+        event.target.classList.add('border-blue-500', 'text-blue-600');
+    } else {
+        // Find the button for this tab
+        const buttons = document.querySelectorAll('.schema-tab-btn');
+        buttons.forEach(btn => {
+            if (btn.textContent.toLowerCase().includes(tabName)) {
+                btn.classList.remove('border-transparent', 'text-gray-500');
+                btn.classList.add('border-blue-500', 'text-blue-600');
+            }
+        });
+    }
+    
+    // Load data when switching to manage or versions tabs
+    if (tabName === 'manage') {
+        populateSchemaModelSelector();
+    } else if (tabName === 'versions') {
+        // Versions tab is ready
+    }
 }
 
 // Schema Validation
 document.addEventListener('DOMContentLoaded', function() {
+    // Batch test form
+    const batchTestForm = document.getElementById('batch-test-form');
+    if (batchTestForm) {
+        batchTestForm.addEventListener('submit', handleBatchTest);
+    }
+    
+    // Probability test form
+    const probaTestForm = document.getElementById('proba-test-form');
+    if (probaTestForm) {
+        probaTestForm.addEventListener('submit', handleProbaTest);
+    }
+    
     const validateForm = document.getElementById('validate-schema-form');
     if (validateForm) {
         validateForm.addEventListener('submit', async (e) => {
@@ -2073,22 +2897,257 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         });
     }
+    
+    // Populate schema model selector when schemas tab is shown
+    if (document.getElementById('schemas')) {
+        const observer = new MutationObserver((mutations) => {
+            mutations.forEach((mutation) => {
+                if (mutation.type === 'attributes' && mutation.attributeName === 'class') {
+                    const schemasTab = document.getElementById('schemas');
+                    if (schemasTab && schemasTab.classList.contains('active')) {
+                        populateSchemaModelSelector();
+                    }
+                }
+            });
+        });
+        observer.observe(document.getElementById('schemas'), { attributes: true });
+    }
 });
 
 // A/B Testing Functions
+let currentABTests = [];
+let selectedABTestId = null;
+
 async function loadABTests() {
     try {
-        // Note: Backend might need a GET endpoint for listing tests
-        // For now, we'll show a message
-        const container = document.getElementById('ab-tests-list');
+        // Try to get list of A/B tests (if endpoint exists)
+        try {
+            const tests = await apiCall('/monitoring/ab-tests');
+            currentABTests = Array.isArray(tests) ? tests : [];
+            renderABTestsList(currentABTests);
+        } catch (error) {
+            // If GET endpoint doesn't exist, show placeholder
+            const container = document.getElementById('ab-tests-list');
+            container.innerHTML = `
+                <div class="text-center py-8 text-gray-500">
+                    <p class="mb-2">A/B test listing requires backend GET /monitoring/ab-tests endpoint</p>
+                    <p class="text-sm">Use the "Create A/B Test" button to create a new test</p>
+                    <p class="text-xs mt-2 text-gray-400">Note: Once created, tests will appear here when GET endpoint is available</p>
+                </div>
+            `;
+        }
+    } catch (error) {
+        console.error('Error loading A/B tests:', error);
+    }
+}
+
+function renderABTestsList(tests) {
+    const container = document.getElementById('ab-tests-list');
+    
+    if (!tests || tests.length === 0) {
         container.innerHTML = `
             <div class="text-center py-8 text-gray-500">
-                <p>A/B test listing requires backend GET endpoint</p>
+                <p>No A/B tests created yet</p>
                 <p class="text-sm mt-2">Use the "Create A/B Test" button to create a new test</p>
             </div>
         `;
+        return;
+    }
+    
+    container.innerHTML = tests.map(test => `
+        <div class="border-b border-gray-200 py-4 last:border-b-0">
+            <div class="flex items-center justify-between">
+                <div class="flex-1">
+                    <h4 class="text-lg font-medium text-gray-900">${test.test_name || 'Unnamed Test'}</h4>
+                    <div class="mt-1 flex items-center space-x-4 text-sm text-gray-500">
+                        <span><i class="fas fa-calendar mr-1"></i>${new Date(test.created_at || test.scheduled_start).toLocaleDateString()}</span>
+                        <span class="px-2 py-1 rounded-full text-xs ${getABTestStatusClass(test.status)}">${test.status || 'unknown'}</span>
+                        <span>Variant A: ${test.variant_a_percentage || 50}%</span>
+                        <span>Variant B: ${test.variant_b_percentage || 50}%</span>
+                    </div>
+                    ${test.description ? `<p class="mt-2 text-sm text-gray-600">${test.description}</p>` : ''}
+                </div>
+                <div class="flex items-center space-x-2">
+                    <button onclick="getABTestDetails('${test.id || test.test_id}')" class="text-blue-600 hover:text-blue-800" title="View Details">
+                        <i class="fas fa-eye"></i>
+                    </button>
+                    <button onclick="getABTestMetrics('${test.id || test.test_id}')" class="text-purple-600 hover:text-purple-800" title="Metrics">
+                        <i class="fas fa-chart-bar"></i>
+                    </button>
+                    ${test.status === 'running' ? `
+                        <button onclick="stopABTest('${test.id || test.test_id}')" class="text-red-600 hover:text-red-800" title="Stop">
+                            <i class="fas fa-stop"></i>
+                        </button>
+                    ` : `
+                        <button onclick="startABTest('${test.id || test.test_id}')" class="text-green-600 hover:text-green-800" title="Start">
+                            <i class="fas fa-play"></i>
+                        </button>
+                    `}
+                </div>
+            </div>
+        </div>
+    `).join('');
+}
+
+function getABTestStatusClass(status) {
+    switch(status) {
+        case 'running': return 'bg-green-100 text-green-800';
+        case 'stopped': return 'bg-gray-100 text-gray-800';
+        case 'completed': return 'bg-blue-100 text-blue-800';
+        case 'error': return 'bg-red-100 text-red-800';
+        default: return 'bg-yellow-100 text-yellow-800';
+    }
+}
+
+async function getABTestDetails(testId) {
+    try {
+        // Try to get test details (if endpoint exists)
+        try {
+            const test = await apiCall(`/monitoring/ab-tests/${testId}`);
+            showABTestDetails(test);
+        } catch (error) {
+            // If endpoint doesn't exist, show notification
+            showNotification('GET endpoint for A/B test details not available', 'info');
+        }
     } catch (error) {
-        console.error('Error loading A/B tests:', error);
+        console.error('Error getting A/B test details:', error);
+        showNotification('Failed to get A/B test details: ' + (error.message || 'Unknown error'), 'error');
+    }
+}
+
+function showABTestDetails(test) {
+    const modal = document.getElementById('ab-test-details-modal');
+    if (modal) {
+        document.getElementById('ab-test-details-content').innerHTML = `
+            <div class="space-y-4">
+                <div class="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                    <h4 class="font-medium text-blue-800 mb-2">${test.test_name}</h4>
+                    <p class="text-sm text-blue-700">${test.description || 'No description'}</p>
+                </div>
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <p class="text-sm font-medium text-gray-700">Status</p>
+                        <p class="text-sm text-gray-900">${test.status || 'unknown'}</p>
+                    </div>
+                    <div>
+                        <p class="text-sm font-medium text-gray-700">Primary Metric</p>
+                        <p class="text-sm text-gray-900">${test.primary_metric || 'N/A'}</p>
+                    </div>
+                    <div>
+                        <p class="text-sm font-medium text-gray-700">Variant A</p>
+                        <p class="text-sm text-gray-900">${test.variant_a_percentage || 50}%</p>
+                    </div>
+                    <div>
+                        <p class="text-sm font-medium text-gray-700">Variant B</p>
+                        <p class="text-sm text-gray-900">${test.variant_b_percentage || 50}%</p>
+                    </div>
+                </div>
+                <div class="bg-gray-50 border border-gray-200 rounded-lg p-4">
+                    <h4 class="font-medium text-gray-800 mb-2">Full Details</h4>
+                    <pre class="text-xs bg-white p-3 rounded overflow-x-auto">${JSON.stringify(test, null, 2)}</pre>
+                </div>
+            </div>
+        `;
+        modal.classList.remove('hidden');
+    }
+}
+
+function closeABTestDetailsModal() {
+    document.getElementById('ab-test-details-modal').classList.add('hidden');
+}
+
+async function startABTest(testId) {
+    try {
+        await apiCall(`/monitoring/ab-tests/${testId}/start`, {
+            method: 'POST'
+        });
+        showNotification('A/B test started successfully', 'success');
+        loadABTests();
+    } catch (error) {
+        console.error('Error starting A/B test:', error);
+        showNotification('Failed to start A/B test: ' + (error.message || 'Unknown error'), 'error');
+    }
+}
+
+async function stopABTest(testId) {
+    if (!confirm('Are you sure you want to stop this A/B test?')) {
+        return;
+    }
+    
+    try {
+        await apiCall(`/monitoring/ab-tests/${testId}/stop`, {
+            method: 'POST'
+        });
+        showNotification('A/B test stopped successfully', 'success');
+        loadABTests();
+    } catch (error) {
+        console.error('Error stopping A/B test:', error);
+        showNotification('Failed to stop A/B test: ' + (error.message || 'Unknown error'), 'error');
+    }
+}
+
+async function getABTestMetrics(testId) {
+    try {
+        const metrics = await apiCall(`/monitoring/ab-tests/${testId}/metrics`);
+        
+        selectedABTestId = testId;
+        const metricsSection = document.getElementById('ab-test-metrics-section');
+        const metricsDisplay = document.getElementById('ab-test-metrics-display');
+        
+        metricsSection.classList.remove('hidden');
+        metricsDisplay.innerHTML = `
+            <div class="space-y-4">
+                <div class="grid grid-cols-2 gap-4">
+                    <div class="bg-blue-50 p-4 rounded">
+                        <div class="text-sm text-gray-600">Variant A Requests</div>
+                        <div class="text-2xl font-bold text-blue-600">${metrics.variant_a_requests || 0}</div>
+                    </div>
+                    <div class="bg-green-50 p-4 rounded">
+                        <div class="text-sm text-gray-600">Variant B Requests</div>
+                        <div class="text-2xl font-bold text-green-600">${metrics.variant_b_requests || 0}</div>
+                    </div>
+                    <div class="bg-purple-50 p-4 rounded">
+                        <div class="text-sm text-gray-600">Variant A Performance</div>
+                        <div class="text-2xl font-bold text-purple-600">${(metrics.variant_a_performance || 0).toFixed(2)}</div>
+                    </div>
+                    <div class="bg-orange-50 p-4 rounded">
+                        <div class="text-sm text-gray-600">Variant B Performance</div>
+                        <div class="text-2xl font-bold text-orange-600">${(metrics.variant_b_performance || 0).toFixed(2)}</div>
+                    </div>
+                </div>
+                ${metrics.statistical_significance !== undefined ? `
+                    <div class="bg-${metrics.statistical_significance ? 'green' : 'yellow'}-50 border border-${metrics.statistical_significance ? 'green' : 'yellow'}-200 rounded-lg p-4">
+                        <h4 class="font-medium text-${metrics.statistical_significance ? 'green' : 'yellow'}-800 mb-2">
+                            Statistical Significance: ${metrics.statistical_significance ? 'Significant' : 'Not Significant'}
+                        </h4>
+                        <p class="text-sm text-${metrics.statistical_significance ? 'green' : 'yellow'}-700">
+                            P-value: ${(metrics.p_value || 0).toFixed(4)}
+                        </p>
+                    </div>
+                ` : ''}
+                <div class="bg-gray-50 border border-gray-200 rounded-lg p-4">
+                    <h4 class="font-medium text-gray-800 mb-2">Full Metrics</h4>
+                    <pre class="text-xs bg-white p-3 rounded overflow-x-auto">${JSON.stringify(metrics, null, 2)}</pre>
+                </div>
+            </div>
+        `;
+    } catch (error) {
+        console.error('Error getting A/B test metrics:', error);
+        showNotification('Failed to get A/B test metrics: ' + (error.message || 'Unknown error'), 'error');
+    }
+}
+
+async function assignABTestVariant(testId, variant) {
+    try {
+        const result = await apiCall(`/monitoring/ab-tests/${testId}/assign`, {
+            method: 'POST',
+            body: JSON.stringify({ variant: variant })
+        });
+        
+        showNotification(`Assigned to variant ${result.variant || variant}`, 'success');
+    } catch (error) {
+        console.error('Error assigning A/B test variant:', error);
+        showNotification('Failed to assign variant: ' + (error.message || 'Unknown error'), 'error');
     }
 }
 
@@ -2154,7 +3213,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 
                 showNotification('A/B test created successfully!', 'success');
                 closeCreateABTestModal();
-                loadABTests();
+                // Refresh the list (will work once GET endpoint is available)
+                setTimeout(() => loadABTests(), 1000);
             } catch (error) {
                 showNotification('Error creating A/B test: ' + error.message, 'error');
             }
@@ -2213,7 +3273,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 
                 showNotification('Canary deployment created successfully!', 'success');
                 closeCreateCanaryModal();
-                loadCanaryDeployments();
+                // Refresh the list (will work once GET endpoint is available)
+                setTimeout(() => loadCanaryDeployments(), 1000);
             } catch (error) {
                 showNotification('Error creating canary: ' + error.message, 'error');
             }
@@ -2221,20 +3282,276 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 });
 
+// Canary Deployment Management
+let currentCanaries = [];
+
 async function loadCanaryDeployments() {
     try {
-        // Note: Backend might need a GET endpoint for listing canaries
-        const container = document.getElementById('canary-list');
-        container.innerHTML = `
-            <div class="text-center py-8 text-gray-500">
-                <p>Canary listing requires backend GET endpoint</p>
-                <p class="text-sm mt-2">Use the "Create Canary" button to create a new canary deployment</p>
-            </div>
-        `;
+        // Try to get list of canaries (if endpoint exists)
+        try {
+            const canaries = await apiCall('/monitoring/canary');
+            currentCanaries = Array.isArray(canaries) ? canaries : [];
+            renderCanaryList(currentCanaries);
+        } catch (error) {
+            // If GET endpoint doesn't exist, show placeholder
+            const container = document.getElementById('canary-list');
+            container.innerHTML = `
+                <div class="text-center py-8 text-gray-500">
+                    <p class="mb-2">Canary listing requires backend GET /monitoring/canary endpoint</p>
+                    <p class="text-sm">Use the "Create Canary" button to create a new canary deployment</p>
+                    <p class="text-xs mt-2 text-gray-400">Note: Once created, canaries will appear here when GET endpoint is available</p>
+                </div>
+            `;
+        }
     } catch (error) {
         console.error('Error loading canary deployments:', error);
     }
 }
+
+function renderCanaryList(canaries) {
+    const container = document.getElementById('canary-list');
+    
+    if (!canaries || canaries.length === 0) {
+        container.innerHTML = `
+            <div class="text-center py-8 text-gray-500">
+                <p>No canary deployments yet</p>
+                <p class="text-sm mt-2">Use the "Create Canary" button to create a new canary deployment</p>
+            </div>
+        `;
+        return;
+    }
+    
+    container.innerHTML = canaries.map(canary => `
+        <div class="border-b border-gray-200 py-4 last:border-b-0">
+            <div class="flex items-center justify-between">
+                <div class="flex-1">
+                    <h4 class="text-lg font-medium text-gray-900">${canary.deployment_name || 'Unnamed Canary'}</h4>
+                    <div class="mt-1 flex items-center space-x-4 text-sm text-gray-500">
+                        <span><i class="fas fa-calendar mr-1"></i>${new Date(canary.created_at || canary.scheduled_start).toLocaleDateString()}</span>
+                        <span class="px-2 py-1 rounded-full text-xs ${getCanaryStatusClass(canary.status)}">${canary.status || 'unknown'}</span>
+                        <span>Traffic: ${canary.current_traffic_percentage || 0}%</span>
+                        <span>Stage: ${canary.current_stage || 0}/${(canary.rollout_stages || []).length}</span>
+                    </div>
+                    ${canary.description ? `<p class="mt-2 text-sm text-gray-600">${canary.description}</p>` : ''}
+                </div>
+                <div class="flex items-center space-x-2">
+                    <button onclick="getCanaryDetails('${canary.id || canary.canary_id}')" class="text-blue-600 hover:text-blue-800" title="View Details">
+                        <i class="fas fa-eye"></i>
+                    </button>
+                    <button onclick="getCanaryMetrics('${canary.id || canary.canary_id}')" class="text-purple-600 hover:text-purple-800" title="Metrics">
+                        <i class="fas fa-chart-bar"></i>
+                    </button>
+                    <button onclick="checkCanaryHealth('${canary.id || canary.canary_id}')" class="text-green-600 hover:text-green-800" title="Health">
+                        <i class="fas fa-heartbeat"></i>
+                    </button>
+                    ${canary.status === 'running' ? `
+                        <button onclick="advanceCanaryRollout('${canary.id || canary.canary_id}')" class="text-blue-600 hover:text-blue-800" title="Advance">
+                            <i class="fas fa-forward"></i>
+                        </button>
+                        <button onclick="rollbackCanary('${canary.id || canary.canary_id}')" class="text-red-600 hover:text-red-800" title="Rollback">
+                            <i class="fas fa-undo"></i>
+                        </button>
+                    ` : canary.status === 'stopped' ? `
+                        <button onclick="startCanaryRollout('${canary.id || canary.canary_id}')" class="text-green-600 hover:text-green-800" title="Start">
+                            <i class="fas fa-play"></i>
+                        </button>
+                    ` : ''}
+                </div>
+            </div>
+        </div>
+    `).join('');
+}
+
+function getCanaryStatusClass(status) {
+    switch(status) {
+        case 'running': return 'bg-green-100 text-green-800';
+        case 'stopped': return 'bg-gray-100 text-gray-800';
+        case 'completed': return 'bg-blue-100 text-blue-800';
+        case 'rolled_back': return 'bg-red-100 text-red-800';
+        case 'error': return 'bg-red-100 text-red-800';
+        default: return 'bg-yellow-100 text-yellow-800';
+    }
+}
+
+async function getCanaryDetails(canaryId) {
+    try {
+        // Try to get canary details (if endpoint exists)
+        try {
+            const canary = await apiCall(`/monitoring/canary/${canaryId}`);
+            showCanaryDetails(canary);
+        } catch (error) {
+            showNotification('GET endpoint for canary details not available', 'info');
+        }
+    } catch (error) {
+        console.error('Error getting canary details:', error);
+        showNotification('Failed to get canary details: ' + (error.message || 'Unknown error'), 'error');
+    }
+}
+
+function showCanaryDetails(canary) {
+    const modal = document.getElementById('canary-details-modal');
+    if (modal) {
+        document.getElementById('canary-details-content').innerHTML = `
+            <div class="space-y-4">
+                <div class="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                    <h4 class="font-medium text-blue-800 mb-2">${canary.deployment_name}</h4>
+                    <p class="text-sm text-blue-700">${canary.description || 'No description'}</p>
+                </div>
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <p class="text-sm font-medium text-gray-700">Status</p>
+                        <p class="text-sm text-gray-900">${canary.status || 'unknown'}</p>
+                    </div>
+                    <div>
+                        <p class="text-sm font-medium text-gray-700">Current Traffic</p>
+                        <p class="text-sm text-gray-900">${canary.current_traffic_percentage || 0}%</p>
+                    </div>
+                    <div>
+                        <p class="text-sm font-medium text-gray-700">Current Stage</p>
+                        <p class="text-sm text-gray-900">${canary.current_stage || 0}/${(canary.rollout_stages || []).length}</p>
+                    </div>
+                    <div>
+                        <p class="text-sm font-medium text-gray-700">Model ID</p>
+                        <p class="text-sm text-gray-900">${canary.model_id || 'N/A'}</p>
+                    </div>
+                </div>
+                <div class="bg-gray-50 border border-gray-200 rounded-lg p-4">
+                    <h4 class="font-medium text-gray-800 mb-2">Full Details</h4>
+                    <pre class="text-xs bg-white p-3 rounded overflow-x-auto">${JSON.stringify(canary, null, 2)}</pre>
+                </div>
+            </div>
+        `;
+        modal.classList.remove('hidden');
+    }
+}
+
+function closeCanaryDetailsModal() {
+    document.getElementById('canary-details-modal').classList.add('hidden');
+}
+
+async function startCanaryRollout(canaryId) {
+    try {
+        await apiCall(`/monitoring/canary/${canaryId}/start`, {
+            method: 'POST'
+        });
+        showNotification('Canary rollout started successfully', 'success');
+        loadCanaryDeployments();
+    } catch (error) {
+        console.error('Error starting canary rollout:', error);
+        showNotification('Failed to start canary rollout: ' + (error.message || 'Unknown error'), 'error');
+    }
+}
+
+async function advanceCanaryRollout(canaryId) {
+    if (!confirm('Advance canary rollout to the next stage?')) {
+        return;
+    }
+    
+    try {
+        await apiCall(`/monitoring/canary/${canaryId}/advance`, {
+            method: 'POST'
+        });
+        showNotification('Canary rollout advanced successfully', 'success');
+        loadCanaryDeployments();
+    } catch (error) {
+        console.error('Error advancing canary rollout:', error);
+        showNotification('Failed to advance canary rollout: ' + (error.message || 'Unknown error'), 'error');
+    }
+}
+
+async function rollbackCanary(canaryId) {
+    if (!confirm('Are you sure you want to rollback this canary deployment?')) {
+        return;
+    }
+    
+    try {
+        await apiCall(`/monitoring/canary/${canaryId}/rollback`, {
+            method: 'POST'
+        });
+        showNotification('Canary rolled back successfully', 'success');
+        loadCanaryDeployments();
+    } catch (error) {
+        console.error('Error rolling back canary:', error);
+        showNotification('Failed to rollback canary: ' + (error.message || 'Unknown error'), 'error');
+    }
+}
+
+async function getCanaryMetrics(canaryId) {
+    try {
+        const metrics = await apiCall(`/monitoring/canary/${canaryId}/metrics`);
+        
+        selectedCanaryId = canaryId;
+        const metricsSection = document.getElementById('canary-metrics-section');
+        const metricsDisplay = document.getElementById('canary-metrics-display');
+        
+        metricsSection.classList.remove('hidden');
+        metricsDisplay.innerHTML = `
+            <div class="space-y-4">
+                <div class="grid grid-cols-3 gap-4">
+                    <div class="bg-blue-50 p-4 rounded">
+                        <div class="text-sm text-gray-600">Total Requests</div>
+                        <div class="text-2xl font-bold text-blue-600">${metrics.total_requests || 0}</div>
+                    </div>
+                    <div class="bg-green-50 p-4 rounded">
+                        <div class="text-sm text-gray-600">Success Rate</div>
+                        <div class="text-2xl font-bold text-green-600">${((metrics.success_rate || 0) * 100).toFixed(1)}%</div>
+                    </div>
+                    <div class="bg-purple-50 p-4 rounded">
+                        <div class="text-sm text-gray-600">Avg Latency</div>
+                        <div class="text-2xl font-bold text-purple-600">${Math.round(metrics.avg_latency_ms || 0)}ms</div>
+                    </div>
+                </div>
+                <div class="bg-gray-50 border border-gray-200 rounded-lg p-4">
+                    <h4 class="font-medium text-gray-800 mb-2">Full Metrics</h4>
+                    <pre class="text-xs bg-white p-3 rounded overflow-x-auto">${JSON.stringify(metrics, null, 2)}</pre>
+                </div>
+            </div>
+        `;
+    } catch (error) {
+        console.error('Error getting canary metrics:', error);
+        showNotification('Failed to get canary metrics: ' + (error.message || 'Unknown error'), 'error');
+    }
+}
+
+async function checkCanaryHealth(canaryId) {
+    try {
+        const health = await apiCall(`/monitoring/canary/${canaryId}/health`);
+        
+        const healthModal = document.getElementById('canary-health-modal');
+        if (healthModal) {
+            document.getElementById('canary-health-content').innerHTML = `
+                <div class="space-y-4">
+                    <div class="bg-${health.healthy ? 'green' : 'red'}-50 border border-${health.healthy ? 'green' : 'red'}-200 rounded-lg p-4">
+                        <h4 class="font-medium text-${health.healthy ? 'green' : 'red'}-800 mb-2">
+                            Health Status: ${health.healthy ? 'Healthy' : 'Unhealthy'}
+                        </h4>
+                        ${health.health_score !== undefined ? `
+                            <p class="text-sm text-${health.healthy ? 'green' : 'red'}-700">
+                                Health Score: ${(health.health_score * 100).toFixed(1)}%
+                            </p>
+                        ` : ''}
+                    </div>
+                    <div class="bg-gray-50 border border-gray-200 rounded-lg p-4">
+                        <h4 class="font-medium text-gray-800 mb-2">Health Details</h4>
+                        <pre class="text-xs bg-white p-3 rounded overflow-x-auto">${JSON.stringify(health, null, 2)}</pre>
+                    </div>
+                </div>
+            `;
+            healthModal.classList.remove('hidden');
+        } else {
+            showNotification(`Canary Health: ${health.healthy ? 'Healthy' : 'Unhealthy'}`, health.healthy ? 'success' : 'error');
+        }
+    } catch (error) {
+        console.error('Error checking canary health:', error);
+        showNotification('Failed to check canary health: ' + (error.message || 'Unknown error'), 'error');
+    }
+}
+
+function closeCanaryHealthModal() {
+    document.getElementById('canary-health-modal').classList.add('hidden');
+}
+
+let selectedCanaryId = null;
 
 // Governance Functions
 function showGovernanceTab(tabName) {
@@ -2249,20 +3566,166 @@ function showGovernanceTab(tabName) {
     event.target.classList.add('border-blue-500', 'text-blue-600');
 }
 
+// Governance Functions
 function openCreateLineageModal() {
-    showNotification('Lineage creation form coming soon', 'info');
+    const modal = document.getElementById('create-lineage-modal');
+    if (modal) {
+        modal.classList.remove('hidden');
+    } else {
+        showNotification('Lineage modal not found', 'error');
+    }
+}
+
+function closeCreateLineageModal() {
+    document.getElementById('create-lineage-modal').classList.add('hidden');
+}
+
+async function submitCreateLineage(e) {
+    e.preventDefault();
+    const lineageData = {
+        lineage_type: document.getElementById('lineage-type').value,
+        source_id: document.getElementById('lineage-source-id').value,
+        source_type: document.getElementById('lineage-source-type').value,
+        target_id: document.getElementById('lineage-target-id').value,
+        target_type: document.getElementById('lineage-target-type').value,
+        relationship_type: document.getElementById('lineage-relationship-type').value,
+        source_metadata: JSON.parse(document.getElementById('lineage-source-metadata').value || '{}'),
+        target_metadata: JSON.parse(document.getElementById('lineage-target-metadata').value || '{}'),
+        relationship_metadata: JSON.parse(document.getElementById('lineage-relationship-metadata').value || '{}')
+    };
+    
+    try {
+        await apiCall('/monitoring/governance/lineage', {
+            method: 'POST',
+            body: JSON.stringify(lineageData)
+        });
+        
+        showNotification('Data lineage created successfully', 'success');
+        closeCreateLineageModal();
+    } catch (error) {
+        console.error('Error creating data lineage:', error);
+        showNotification('Failed to create data lineage: ' + (error.message || 'Unknown error'), 'error');
+    }
 }
 
 function openCreateWorkflowModal() {
-    showNotification('Workflow creation form coming soon', 'info');
+    const modal = document.getElementById('create-workflow-modal');
+    if (modal) {
+        modal.classList.remove('hidden');
+    } else {
+        showNotification('Workflow modal not found', 'error');
+    }
+}
+
+function closeCreateWorkflowModal() {
+    document.getElementById('create-workflow-modal').classList.add('hidden');
+}
+
+async function submitCreateWorkflow(e) {
+    e.preventDefault();
+    const workflowData = {
+        workflow_type: document.getElementById('workflow-type').value,
+        resource_type: document.getElementById('workflow-resource-type').value,
+        resource_id: document.getElementById('workflow-resource-id').value,
+        request_data: JSON.parse(document.getElementById('workflow-request-data').value || '{}'),
+        policy_checks: JSON.parse(document.getElementById('workflow-policy-checks').value || '[]')
+    };
+    
+    try {
+        await apiCall('/monitoring/governance/workflows', {
+            method: 'POST',
+            body: JSON.stringify(workflowData)
+        });
+        
+        showNotification('Governance workflow created successfully', 'success');
+        closeCreateWorkflowModal();
+    } catch (error) {
+        console.error('Error creating workflow:', error);
+        showNotification('Failed to create workflow: ' + (error.message || 'Unknown error'), 'error');
+    }
 }
 
 function openCreateComplianceModal() {
-    showNotification('Compliance record creation form coming soon', 'info');
+    const modal = document.getElementById('create-compliance-modal');
+    if (modal) {
+        modal.classList.remove('hidden');
+    } else {
+        showNotification('Compliance modal not found', 'error');
+    }
+}
+
+function closeCreateComplianceModal() {
+    document.getElementById('create-compliance-modal').classList.add('hidden');
+}
+
+async function submitCreateCompliance(e) {
+    e.preventDefault();
+    const complianceData = {
+        compliance_type: document.getElementById('compliance-type').value,
+        record_type: document.getElementById('compliance-record-type').value,
+        subject_id: document.getElementById('compliance-subject-id').value,
+        subject_type: document.getElementById('compliance-subject-type').value,
+        description: document.getElementById('compliance-description').value,
+        request_id: document.getElementById('compliance-request-id').value,
+        requested_by: document.getElementById('compliance-requested-by').value,
+        data_scope: document.getElementById('compliance-data-scope').value,
+        additional_data: JSON.parse(document.getElementById('compliance-additional-data').value || '{}')
+    };
+    
+    try {
+        await apiCall('/monitoring/governance/compliance', {
+            method: 'POST',
+            body: JSON.stringify(complianceData)
+        });
+        
+        showNotification('Compliance record created successfully', 'success');
+        closeCreateComplianceModal();
+    } catch (error) {
+        console.error('Error creating compliance record:', error);
+        showNotification('Failed to create compliance record: ' + (error.message || 'Unknown error'), 'error');
+    }
 }
 
 function openCreateRetentionModal() {
-    showNotification('Retention policy creation form coming soon', 'info');
+    const modal = document.getElementById('create-retention-modal');
+    if (modal) {
+        modal.classList.remove('hidden');
+    } else {
+        showNotification('Retention policy modal not found', 'error');
+    }
+}
+
+function closeCreateRetentionModal() {
+    document.getElementById('create-retention-modal').classList.add('hidden');
+}
+
+async function submitCreateRetentionPolicy(e) {
+    e.preventDefault();
+    const policyData = {
+        policy_name: document.getElementById('retention-policy-name').value,
+        policy_description: document.getElementById('retention-policy-description').value,
+        resource_type: document.getElementById('retention-resource-type').value,
+        model_id: document.getElementById('retention-model-id').value || null,
+        deployment_id: document.getElementById('retention-deployment-id').value || null,
+        retention_period_days: parseInt(document.getElementById('retention-period-days').value),
+        retention_condition: document.getElementById('retention-condition').value,
+        action_on_expiry: document.getElementById('retention-action').value,
+        archive_location: document.getElementById('retention-archive-location').value,
+        created_by: document.getElementById('retention-created-by').value
+    };
+    
+    try {
+        await apiCall('/monitoring/governance/retention-policies', {
+            method: 'POST',
+            body: JSON.stringify(policyData)
+        });
+        
+        showNotification('Data retention policy created successfully', 'success');
+        closeCreateRetentionModal();
+    } catch (error) {
+        console.error('Error creating retention policy:', error);
+        showNotification('Failed to create retention policy: ' + (error.message || 'Unknown error'), 'error');
+    }
 }
 
 // Explainability Functions
@@ -2276,6 +3739,12 @@ async function generateExplanation() {
     }
     
     try {
+        if (method === 'importance') {
+            // Use GET endpoint for feature importance
+            await getFeatureImportance(modelId);
+            return;
+        }
+        
         const endpoint = method === 'shap' 
             ? `/monitoring/models/${modelId}/explain/shap`
             : `/monitoring/models/${modelId}/explain/lime`;
@@ -2351,6 +3820,82 @@ async function runDataQualityCheck() {
     }
 }
 
+async function detectOutliers() {
+    const modelId = document.getElementById('data-quality-model-select').value;
+    if (!modelId) {
+        showNotification('Please select a model', 'error');
+        return;
+    }
+    
+    try {
+        const result = await apiCall(`/monitoring/models/${modelId}/data-quality/outliers`, {
+            method: 'POST',
+            body: JSON.stringify({})
+        });
+        
+        const container = document.getElementById('data-quality-display');
+        const existingHTML = container.innerHTML;
+        container.innerHTML = existingHTML + `
+            <div class="mt-4 bg-orange-50 border border-orange-200 rounded-lg p-4">
+                <h4 class="font-medium text-orange-800 mb-2">Outlier Detection</h4>
+                <div class="text-sm text-orange-700">
+                    <p><strong>Outliers Detected:</strong> ${result.outliers_count || 0}</p>
+                    <p><strong>Outlier Percentage:</strong> ${((result.outlier_percentage || 0) * 100).toFixed(2)}%</p>
+                </div>
+                ${result.outliers && result.outliers.length > 0 ? `
+                    <div class="mt-2 max-h-48 overflow-y-auto">
+                        <p class="text-xs font-medium mb-1">Outlier Details:</p>
+                        <pre class="text-xs bg-white p-2 rounded">${JSON.stringify(result.outliers.slice(0, 10), null, 2)}${result.outliers.length > 10 ? '\n... (showing first 10)' : ''}</pre>
+                    </div>
+                ` : ''}
+                <div class="mt-2 bg-white p-2 rounded">
+                    <pre class="text-xs overflow-x-auto">${JSON.stringify(result, null, 2)}</pre>
+                </div>
+            </div>
+        `;
+    } catch (error) {
+        showNotification('Error detecting outliers: ' + error.message, 'error');
+    }
+}
+
+async function detectAnomaly() {
+    const modelId = document.getElementById('data-quality-model-select').value;
+    if (!modelId) {
+        showNotification('Please select a model', 'error');
+        return;
+    }
+    
+    try {
+        const result = await apiCall(`/monitoring/models/${modelId}/data-quality/anomaly`, {
+            method: 'POST',
+            body: JSON.stringify({})
+        });
+        
+        const container = document.getElementById('data-quality-display');
+        const existingHTML = container.innerHTML;
+        container.innerHTML = existingHTML + `
+            <div class="mt-4 bg-red-50 border border-red-200 rounded-lg p-4">
+                <h4 class="font-medium text-red-800 mb-2">Anomaly Detection</h4>
+                <div class="text-sm text-red-700">
+                    <p><strong>Anomalies Detected:</strong> ${result.anomalies_count || 0}</p>
+                    <p><strong>Anomaly Score:</strong> ${(result.anomaly_score || 0).toFixed(3)}</p>
+                </div>
+                ${result.anomalies && result.anomalies.length > 0 ? `
+                    <div class="mt-2 max-h-48 overflow-y-auto">
+                        <p class="text-xs font-medium mb-1">Anomaly Details:</p>
+                        <pre class="text-xs bg-white p-2 rounded">${JSON.stringify(result.anomalies.slice(0, 10), null, 2)}${result.anomalies.length > 10 ? '\n... (showing first 10)' : ''}</pre>
+                    </div>
+                ` : ''}
+                <div class="mt-2 bg-white p-2 rounded">
+                    <pre class="text-xs overflow-x-auto">${JSON.stringify(result, null, 2)}</pre>
+                </div>
+            </div>
+        `;
+    } catch (error) {
+        showNotification('Error detecting anomalies: ' + error.message, 'error');
+    }
+}
+
 // Fairness Functions
 async function loadFairnessMetrics() {
     const modelId = document.getElementById('fairness-model-select').value;
@@ -2385,6 +3930,83 @@ async function calculateFairnessMetrics() {
         `;
     } catch (error) {
         showNotification('Error calculating fairness metrics: ' + error.message, 'error');
+    }
+}
+
+async function configureFairnessAttributes() {
+    const modelId = document.getElementById('fairness-model-select').value;
+    if (!modelId) {
+        showNotification('Please select a model', 'error');
+        return;
+    }
+    
+    const modal = document.getElementById('fairness-attributes-modal');
+    if (modal) {
+        document.getElementById('fairness-attributes-model-id').value = modelId;
+        modal.classList.remove('hidden');
+    } else {
+        showNotification('Fairness attributes modal not found', 'error');
+    }
+}
+
+function closeFairnessAttributesModal() {
+    document.getElementById('fairness-attributes-modal').classList.add('hidden');
+}
+
+async function submitFairnessAttributes(e) {
+    e.preventDefault();
+    const modelId = document.getElementById('fairness-attributes-model-id').value;
+    const protectedAttributes = document.getElementById('fairness-protected-attributes').value.split(',').map(a => a.trim()).filter(a => a);
+    const sensitiveGroups = document.getElementById('fairness-sensitive-groups').value.split(',').map(g => g.trim()).filter(g => g);
+    
+    try {
+        await apiCall(`/monitoring/models/${modelId}/fairness/attributes`, {
+            method: 'POST',
+            body: JSON.stringify({
+                protected_attributes: protectedAttributes,
+                sensitive_groups: sensitiveGroups
+            })
+        });
+        
+        showNotification('Fairness attributes configured successfully', 'success');
+        closeFairnessAttributesModal();
+    } catch (error) {
+        console.error('Error configuring fairness attributes:', error);
+        showNotification('Failed to configure fairness attributes: ' + (error.message || 'Unknown error'), 'error');
+    }
+}
+
+async function getDemographicDistribution() {
+    const modelId = document.getElementById('fairness-model-select').value;
+    if (!modelId) {
+        showNotification('Please select a model', 'error');
+        return;
+    }
+    
+    try {
+        const demographics = await apiCall(`/monitoring/models/${modelId}/fairness/demographics`);
+        
+        const container = document.getElementById('fairness-display');
+        const existingHTML = container.innerHTML;
+        container.innerHTML = existingHTML + `
+            <div class="mt-4 bg-blue-50 border border-blue-200 rounded-lg p-4">
+                <h4 class="font-medium text-blue-800 mb-2">Demographic Distribution</h4>
+                <div class="space-y-2">
+                    ${Object.entries(demographics.distribution || demographics).map(([group, count]) => `
+                        <div class="flex items-center justify-between bg-white p-2 rounded">
+                            <span class="text-sm">${group}</span>
+                            <span class="text-sm font-mono">${count}</span>
+                        </div>
+                    `).join('')}
+                </div>
+                <div class="mt-2 bg-white p-2 rounded">
+                    <pre class="text-xs overflow-x-auto">${JSON.stringify(demographics, null, 2)}</pre>
+                </div>
+            </div>
+        `;
+    } catch (error) {
+        console.error('Error getting demographic distribution:', error);
+        showNotification('Failed to get demographic distribution: ' + (error.message || 'Unknown error'), 'error');
     }
 }
 
@@ -2520,8 +4142,230 @@ async function loadAlertRules() {
     }
 }
 
+// Alert Management Functions
 function openCreateAlertRuleModal() {
-    showNotification('Alert rule creation form coming soon', 'info');
+    const modal = document.getElementById('create-alert-rule-modal');
+    if (modal) {
+        modal.classList.remove('hidden');
+    } else {
+        showNotification('Create alert rule modal not found', 'error');
+    }
+}
+
+function closeCreateAlertRuleModal() {
+    document.getElementById('create-alert-rule-modal').classList.add('hidden');
+}
+
+async function submitCreateAlertRule(e) {
+    e.preventDefault();
+    const ruleData = {
+        name: document.getElementById('alert-rule-name').value,
+        description: document.getElementById('alert-rule-description').value,
+        metric: document.getElementById('alert-rule-metric').value,
+        threshold: parseFloat(document.getElementById('alert-rule-threshold').value),
+        operator: document.getElementById('alert-rule-operator').value,
+        severity: document.getElementById('alert-rule-severity').value,
+        model_id: document.getElementById('alert-rule-model-id').value || null,
+        enabled: document.getElementById('alert-rule-enabled').checked
+    };
+    
+    try {
+        await apiCall('/monitoring/alert-rules', {
+            method: 'POST',
+            body: JSON.stringify(ruleData)
+        });
+        
+        showNotification('Alert rule created successfully', 'success');
+        closeCreateAlertRuleModal();
+        loadAlertRules();
+    } catch (error) {
+        console.error('Error creating alert rule:', error);
+        showNotification('Failed to create alert rule: ' + (error.message || 'Unknown error'), 'error');
+    }
+}
+
+async function loadAlertRules() {
+    try {
+        // Note: Backend might need a GET endpoint for listing alert rules
+        const container = document.getElementById('alert-rules-list');
+        container.innerHTML = `
+            <div class="text-center py-8 text-gray-500">
+                <p>Alert rules listing requires backend GET endpoint</p>
+                <p class="text-sm mt-2">Use the "Create Rule" button to create a new alert rule</p>
+            </div>
+        `;
+    } catch (error) {
+        console.error('Error loading alert rules:', error);
+    }
+}
+
+async function acknowledgeAlert(alertId) {
+    try {
+        await apiCall(`/monitoring/alerts/${alertId}/acknowledge`, {
+            method: 'POST'
+        });
+        showNotification('Alert acknowledged successfully', 'success');
+        loadAlerts();
+    } catch (error) {
+        console.error('Error acknowledging alert:', error);
+        showNotification('Failed to acknowledge alert: ' + (error.message || 'Unknown error'), 'error');
+    }
+}
+
+async function checkAndCreateAlerts() {
+    try {
+        const alerts = await apiCall('/monitoring/alerts/check', {
+            method: 'POST'
+        });
+        showNotification(`Checked alerts: ${alerts.length} new alerts created`, 'success');
+        loadAlerts();
+    } catch (error) {
+        console.error('Error checking alerts:', error);
+        showNotification('Failed to check alerts: ' + (error.message || 'Unknown error'), 'error');
+    }
+}
+
+function openCreateNotificationChannelModal() {
+    const modal = document.getElementById('create-notification-channel-modal');
+    if (modal) {
+        modal.classList.remove('hidden');
+    } else {
+        showNotification('Notification channel modal not found', 'error');
+    }
+}
+
+function closeCreateNotificationChannelModal() {
+    document.getElementById('create-notification-channel-modal').classList.add('hidden');
+}
+
+async function submitCreateNotificationChannel(e) {
+    e.preventDefault();
+    const channelData = {
+        name: document.getElementById('notification-channel-name').value,
+        type: document.getElementById('notification-channel-type').value,
+        config: JSON.parse(document.getElementById('notification-channel-config').value)
+    };
+    
+    try {
+        await apiCall('/monitoring/notifications/channels', {
+            method: 'POST',
+            body: JSON.stringify(channelData)
+        });
+        
+        showNotification('Notification channel created successfully', 'success');
+        closeCreateNotificationChannelModal();
+    } catch (error) {
+        console.error('Error creating notification channel:', error);
+        showNotification('Failed to create notification channel: ' + (error.message || 'Unknown error'), 'error');
+    }
+}
+
+async function sendAlertNotification() {
+    const alertId = document.getElementById('send-notification-alert-id').value;
+    const channelId = document.getElementById('send-notification-channel-id').value;
+    
+    try {
+        await apiCall('/monitoring/notifications/send', {
+            method: 'POST',
+            body: JSON.stringify({
+                alert_id: alertId,
+                channel_id: channelId
+            })
+        });
+        
+        showNotification('Notification sent successfully', 'success');
+    } catch (error) {
+        console.error('Error sending notification:', error);
+        showNotification('Failed to send notification: ' + (error.message || 'Unknown error'), 'error');
+    }
+}
+
+async function groupAlerts() {
+    const alertIds = document.getElementById('group-alert-ids').value.split(',').map(id => id.trim());
+    
+    try {
+        await apiCall('/monitoring/alerts/group', {
+            method: 'POST',
+            body: JSON.stringify({ alert_ids: alertIds })
+        });
+        
+        showNotification('Alerts grouped successfully', 'success');
+        loadAlerts();
+    } catch (error) {
+        console.error('Error grouping alerts:', error);
+        showNotification('Failed to group alerts: ' + (error.message || 'Unknown error'), 'error');
+    }
+}
+
+function openCreateAlertEscalationModal() {
+    const modal = document.getElementById('create-alert-escalation-modal');
+    if (modal) {
+        modal.classList.remove('hidden');
+    } else {
+        showNotification('Alert escalation modal not found', 'error');
+    }
+}
+
+function closeCreateAlertEscalationModal() {
+    document.getElementById('create-alert-escalation-modal').classList.add('hidden');
+}
+
+async function submitCreateAlertEscalation(e) {
+    e.preventDefault();
+    const escalationData = {
+        name: document.getElementById('escalation-name').value,
+        rules: JSON.parse(document.getElementById('escalation-rules').value),
+        actions: JSON.parse(document.getElementById('escalation-actions').value)
+    };
+    
+    try {
+        await apiCall('/monitoring/alerts/escalations', {
+            method: 'POST',
+            body: JSON.stringify(escalationData)
+        });
+        
+        showNotification('Alert escalation created successfully', 'success');
+        closeCreateAlertEscalationModal();
+    } catch (error) {
+        console.error('Error creating alert escalation:', error);
+        showNotification('Failed to create escalation: ' + (error.message || 'Unknown error'), 'error');
+    }
+}
+
+async function checkAndEscalateAlerts() {
+    try {
+        const escalated = await apiCall('/monitoring/alerts/escalate', {
+            method: 'POST'
+        });
+        showNotification(`Escalated ${escalated.length || 0} alerts`, 'success');
+        loadAlerts();
+    } catch (error) {
+        console.error('Error escalating alerts:', error);
+        showNotification('Failed to escalate alerts: ' + (error.message || 'Unknown error'), 'error');
+    }
+}
+
+async function createAlert() {
+    const alertData = {
+        model_id: document.getElementById('create-alert-model-id').value || null,
+        metric: document.getElementById('create-alert-metric').value,
+        value: parseFloat(document.getElementById('create-alert-value').value),
+        severity: document.getElementById('create-alert-severity').value,
+        message: document.getElementById('create-alert-message').value
+    };
+    
+    try {
+        await apiCall('/monitoring/alerts', {
+            method: 'POST',
+            body: JSON.stringify(alertData)
+        });
+        
+        showNotification('Alert created successfully', 'success');
+        loadAlerts();
+    } catch (error) {
+        console.error('Error creating alert:', error);
+        showNotification('Failed to create alert: ' + (error.message || 'Unknown error'), 'error');
+    }
 }
 
 // Baseline Management Functions
@@ -2654,12 +4498,110 @@ function openCreateComparativeModal() {
     showNotification('Comparative analytics creation form coming soon', 'info');
 }
 
+// Analytics Functions
+async function createComparativeAnalytics(e) {
+    e.preventDefault();
+    const analyticsData = {
+        name: document.getElementById('comparative-analytics-name').value,
+        description: document.getElementById('comparative-analytics-description').value,
+        models: document.getElementById('comparative-analytics-models').value.split(',').map(m => m.trim()),
+        metrics: document.getElementById('comparative-analytics-metrics').value.split(',').map(m => m.trim()),
+        time_range: document.getElementById('comparative-analytics-time-range').value
+    };
+    
+    try {
+        const result = await apiCall('/monitoring/analytics/comparative', {
+            method: 'POST',
+            body: JSON.stringify(analyticsData)
+        });
+        
+        showNotification('Comparative analytics created successfully', 'success');
+        document.getElementById('comparative-list').innerHTML = `
+            <div class="bg-green-50 border border-green-200 rounded-lg p-4">
+                <h4 class="font-medium text-green-800 mb-2">Comparison Created</h4>
+                <pre class="text-xs bg-white p-3 rounded overflow-x-auto">${JSON.stringify(result, null, 2)}</pre>
+            </div>
+        `;
+    } catch (error) {
+        console.error('Error creating comparative analytics:', error);
+        showNotification('Failed to create comparative analytics: ' + (error.message || 'Unknown error'), 'error');
+    }
+}
+
 function openCreateDashboardModal() {
-    showNotification('Custom dashboard creation form coming soon', 'info');
+    const modal = document.getElementById('create-dashboard-modal');
+    if (modal) {
+        modal.classList.remove('hidden');
+    } else {
+        showNotification('Dashboard modal not found', 'error');
+    }
+}
+
+function closeCreateDashboardModal() {
+    document.getElementById('create-dashboard-modal').classList.add('hidden');
+}
+
+async function submitCreateDashboard(e) {
+    e.preventDefault();
+    const dashboardData = {
+        name: document.getElementById('dashboard-name').value,
+        description: document.getElementById('dashboard-description').value,
+        widgets: JSON.parse(document.getElementById('dashboard-widgets').value || '[]'),
+        layout: document.getElementById('dashboard-layout').value,
+        refresh_interval: parseInt(document.getElementById('dashboard-refresh-interval').value || '60')
+    };
+    
+    try {
+        await apiCall('/monitoring/analytics/dashboards', {
+            method: 'POST',
+            body: JSON.stringify(dashboardData)
+        });
+        
+        showNotification('Analytics dashboard created successfully', 'success');
+        closeCreateDashboardModal();
+    } catch (error) {
+        console.error('Error creating dashboard:', error);
+        showNotification('Failed to create dashboard: ' + (error.message || 'Unknown error'), 'error');
+    }
 }
 
 function openCreateReportModal() {
-    showNotification('Automated report creation form coming soon', 'info');
+    const modal = document.getElementById('create-report-modal');
+    if (modal) {
+        modal.classList.remove('hidden');
+    } else {
+        showNotification('Report modal not found', 'error');
+    }
+}
+
+function closeCreateReportModal() {
+    document.getElementById('create-report-modal').classList.add('hidden');
+}
+
+async function submitCreateReport(e) {
+    e.preventDefault();
+    const reportData = {
+        name: document.getElementById('report-name').value,
+        description: document.getElementById('report-description').value,
+        report_type: document.getElementById('report-type').value,
+        schedule: document.getElementById('report-schedule').value,
+        recipients: document.getElementById('report-recipients').value.split(',').map(r => r.trim()),
+        metrics: JSON.parse(document.getElementById('report-metrics').value || '[]'),
+        format: document.getElementById('report-format').value
+    };
+    
+    try {
+        await apiCall('/monitoring/analytics/reports', {
+            method: 'POST',
+            body: JSON.stringify(reportData)
+        });
+        
+        showNotification('Analytics report created successfully', 'success');
+        closeCreateReportModal();
+    } catch (error) {
+        console.error('Error creating report:', error);
+        showNotification('Failed to create report: ' + (error.message || 'Unknown error'), 'error');
+    }
 }
 
 // Model Lifecycle Functions
@@ -2718,17 +4660,186 @@ function renderModelCard(card) {
     `;
 }
 
+// Lifecycle Functions
 function openCreateRetrainingModal() {
-    showNotification('Retraining job creation form coming soon', 'info');
+    const modal = document.getElementById('create-retraining-modal');
+    if (modal) {
+        populateMonitoringModelSelectors();
+        modal.classList.remove('hidden');
+    } else {
+        showNotification('Retraining modal not found', 'error');
+    }
+}
+
+function closeCreateRetrainingModal() {
+    document.getElementById('create-retraining-modal').classList.add('hidden');
+}
+
+async function submitCreateRetrainingJob(e) {
+    e.preventDefault();
+    const jobData = {
+        model_id: document.getElementById('retraining-model-id').value,
+        training_data_path: document.getElementById('retraining-data-path').value,
+        hyperparameters: JSON.parse(document.getElementById('retraining-hyperparameters').value || '{}'),
+        description: document.getElementById('retraining-description').value
+    };
+    
+    try {
+        await apiCall(`/monitoring/models/${jobData.model_id}/retraining/jobs`, {
+            method: 'POST',
+            body: JSON.stringify(jobData)
+        });
+        
+        showNotification('Retraining job created successfully', 'success');
+        closeCreateRetrainingModal();
+        loadRetrainingJobs();
+    } catch (error) {
+        console.error('Error creating retraining job:', error);
+        showNotification('Failed to create retraining job: ' + (error.message || 'Unknown error'), 'error');
+    }
+}
+
+async function configureRetrainingTrigger() {
+    const modelId = document.getElementById('retraining-model-id').value;
+    if (!modelId) {
+        showNotification('Please select a model', 'error');
+        return;
+    }
+    
+    const triggerData = {
+        trigger_type: document.getElementById('retraining-trigger-type').value,
+        threshold: parseFloat(document.getElementById('retraining-trigger-threshold').value),
+        schedule: document.getElementById('retraining-trigger-schedule').value,
+        enabled: document.getElementById('retraining-trigger-enabled').checked
+    };
+    
+    try {
+        await apiCall(`/monitoring/models/${modelId}/retraining/triggers`, {
+            method: 'POST',
+            body: JSON.stringify(triggerData)
+        });
+        
+        showNotification('Retraining trigger configured successfully', 'success');
+    } catch (error) {
+        console.error('Error configuring retraining trigger:', error);
+        showNotification('Failed to configure trigger: ' + (error.message || 'Unknown error'), 'error');
+    }
 }
 
 // Integration Functions
 function openCreateIntegrationModal() {
-    showNotification('Integration creation form coming soon', 'info');
+    const modal = document.getElementById('create-integration-modal');
+    if (modal) {
+        modal.classList.remove('hidden');
+    } else {
+        showNotification('Integration modal not found', 'error');
+    }
+}
+
+function closeCreateIntegrationModal() {
+    document.getElementById('create-integration-modal').classList.add('hidden');
+}
+
+async function submitCreateIntegration(e) {
+    e.preventDefault();
+    const integrationData = {
+        name: document.getElementById('integration-name').value,
+        type: document.getElementById('integration-type').value,
+        config: JSON.parse(document.getElementById('integration-config').value || '{}'),
+        enabled: document.getElementById('integration-enabled').checked
+    };
+    
+    try {
+        await apiCall('/monitoring/integrations', {
+            method: 'POST',
+            body: JSON.stringify(integrationData)
+        });
+        
+        showNotification('Integration created successfully', 'success');
+        closeCreateIntegrationModal();
+        loadIntegrations();
+    } catch (error) {
+        console.error('Error creating integration:', error);
+        showNotification('Failed to create integration: ' + (error.message || 'Unknown error'), 'error');
+    }
 }
 
 function openCreateWebhookModal() {
-    showNotification('Webhook creation form coming soon', 'info');
+    const modal = document.getElementById('create-webhook-modal');
+    if (modal) {
+        modal.classList.remove('hidden');
+    } else {
+        showNotification('Webhook modal not found', 'error');
+    }
+}
+
+function closeCreateWebhookModal() {
+    document.getElementById('create-webhook-modal').classList.add('hidden');
+}
+
+async function submitCreateWebhook(e) {
+    e.preventDefault();
+    const webhookData = {
+        url: document.getElementById('webhook-url').value,
+        events: document.getElementById('webhook-events').value.split(',').map(e => e.trim()),
+        secret: document.getElementById('webhook-secret').value,
+        enabled: document.getElementById('webhook-enabled').checked
+    };
+    
+    try {
+        await apiCall('/monitoring/integrations/webhooks', {
+            method: 'POST',
+            body: JSON.stringify(webhookData)
+        });
+        
+        showNotification('Webhook created successfully', 'success');
+        closeCreateWebhookModal();
+    } catch (error) {
+        console.error('Error creating webhook:', error);
+        showNotification('Failed to create webhook: ' + (error.message || 'Unknown error'), 'error');
+    }
+}
+
+async function createSamplingConfig() {
+    const configData = {
+        model_id: document.getElementById('sampling-model-id').value,
+        sampling_rate: parseFloat(document.getElementById('sampling-rate').value),
+        sampling_strategy: document.getElementById('sampling-strategy').value,
+        enabled: document.getElementById('sampling-enabled').checked
+    };
+    
+    try {
+        await apiCall('/monitoring/integrations/sampling', {
+            method: 'POST',
+            body: JSON.stringify(configData)
+        });
+        
+        showNotification('Sampling configuration created successfully', 'success');
+    } catch (error) {
+        console.error('Error creating sampling config:', error);
+        showNotification('Failed to create sampling config: ' + (error.message || 'Unknown error'), 'error');
+    }
+}
+
+async function createAggregationConfig() {
+    const configData = {
+        metric_name: document.getElementById('aggregation-metric-name').value,
+        aggregation_type: document.getElementById('aggregation-type').value,
+        window_size: parseInt(document.getElementById('aggregation-window-size').value),
+        enabled: document.getElementById('aggregation-enabled').checked
+    };
+    
+    try {
+        await apiCall('/monitoring/integrations/aggregation', {
+            method: 'POST',
+            body: JSON.stringify(configData)
+        });
+        
+        showNotification('Aggregation configuration created successfully', 'success');
+    } catch (error) {
+        console.error('Error creating aggregation config:', error);
+        showNotification('Failed to create aggregation config: ' + (error.message || 'Unknown error'), 'error');
+    }
 }
 
 // Audit Logs Functions
@@ -2828,4 +4939,101 @@ window.generateModelCard = generateModelCard;
 window.openCreateRetrainingModal = openCreateRetrainingModal;
 window.openCreateIntegrationModal = openCreateIntegrationModal;
 window.openCreateWebhookModal = openCreateWebhookModal;
-window.loadAuditLogs = loadAuditLogs; 
+window.loadAuditLogs = loadAuditLogs;
+window.startDeployment = startDeployment;
+window.deleteDeployment = deleteDeployment;
+window.getDeploymentStatus = getDeploymentStatus;
+window.getDeploymentMetrics = getDeploymentMetrics;
+window.testDeploymentEndpoint = testDeploymentEndpoint;
+window.submitDeploymentTest = submitDeploymentTest;
+window.openUpdateDeploymentModal = openUpdateDeploymentModal;
+window.closeUpdateDeploymentModal = closeUpdateDeploymentModal;
+window.submitUpdateDeployment = submitUpdateDeployment;
+window.closeDeploymentStatusModal = closeDeploymentStatusModal;
+window.closeDeploymentMetricsModal = closeDeploymentMetricsModal;
+window.closeDeploymentTestModal = closeDeploymentTestModal;
+window.openUpdateModelModal = openUpdateModelModal;
+window.closeUpdateModelModal = closeUpdateModelModal;
+window.submitUpdateModel = submitUpdateModel;
+window.validateModel = validateModel;
+window.getModelMetrics = getModelMetrics;
+window.closeModelMetricsModal = closeModelMetricsModal;
+window.getABTestDetails = getABTestDetails;
+window.closeABTestDetailsModal = closeABTestDetailsModal;
+window.startABTest = startABTest;
+window.stopABTest = stopABTest;
+window.getABTestMetrics = getABTestMetrics;
+window.assignABTestVariant = assignABTestVariant;
+window.getCanaryDetails = getCanaryDetails;
+window.closeCanaryDetailsModal = closeCanaryDetailsModal;
+window.startCanaryRollout = startCanaryRollout;
+window.advanceCanaryRollout = advanceCanaryRollout;
+window.rollbackCanary = rollbackCanary;
+window.getCanaryMetrics = getCanaryMetrics;
+window.checkCanaryHealth = checkCanaryHealth;
+window.closeCanaryHealthModal = closeCanaryHealthModal;
+window.logPredictionWithGroundTruth = logPredictionWithGroundTruth;
+window.closeDegradationLogModal = closeDegradationLogModal;
+window.submitDegradationLog = submitDegradationLog;
+window.compareModelVersions = compareModelVersions;
+window.closeVersionComparisonModal = closeVersionComparisonModal;
+window.submitVersionComparison = submitVersionComparison;
+window.populateSchemaModelSelector = populateSchemaModelSelector;
+window.loadModelSchemas = loadModelSchemas;
+window.getSchemaExample = getSchemaExample;
+window.getOpenAPISchema = getOpenAPISchema;
+window.closeOpenAPISchemaModal = closeOpenAPISchemaModal;
+window.validateModelSchema = validateModelSchema;
+window.openUpdateModelSchemaModal = openUpdateModelSchemaModal;
+window.closeUpdateModelSchemaModal = closeUpdateModelSchemaModal;
+window.submitUpdateModelSchema = submitUpdateModelSchema;
+window.deleteModelSchema = deleteModelSchema;
+window.loadSchemaVersions = loadSchemaVersions;
+window.openCreateSchemaVersionModal = openCreateSchemaVersionModal;
+window.closeCreateSchemaVersionModal = closeCreateSchemaVersionModal;
+window.submitCreateSchemaVersion = submitCreateSchemaVersion;
+window.viewSchemaVersion = viewSchemaVersion;
+window.closeSchemaVersionViewModal = closeSchemaVersionViewModal;
+window.updateSchema = updateSchema;
+window.closeUpdateSchemaModal = closeUpdateSchemaModal;
+window.submitUpdateSchema = submitUpdateSchema;
+window.deleteSchema = deleteSchema;
+window.loadCommonTemplates = loadCommonTemplates;
+window.closeCreateAlertRuleModal = closeCreateAlertRuleModal;
+window.submitCreateAlertRule = submitCreateAlertRule;
+window.loadAlertRules = loadAlertRules;
+window.acknowledgeAlert = acknowledgeAlert;
+window.checkAndCreateAlerts = checkAndCreateAlerts;
+window.openCreateNotificationChannelModal = openCreateNotificationChannelModal;
+window.closeCreateNotificationChannelModal = closeCreateNotificationChannelModal;
+window.submitCreateNotificationChannel = submitCreateNotificationChannel;
+window.sendAlertNotification = sendAlertNotification;
+window.groupAlerts = groupAlerts;
+window.openCreateAlertEscalationModal = openCreateAlertEscalationModal;
+window.closeCreateAlertEscalationModal = closeCreateAlertEscalationModal;
+window.submitCreateAlertEscalation = submitCreateAlertEscalation;
+window.checkAndEscalateAlerts = checkAndEscalateAlerts;
+window.createAlert = createAlert;
+window.closeCreateLineageModal = closeCreateLineageModal;
+window.submitCreateLineage = submitCreateLineage;
+window.closeCreateWorkflowModal = closeCreateWorkflowModal;
+window.submitCreateWorkflow = submitCreateWorkflow;
+window.closeCreateComplianceModal = closeCreateComplianceModal;
+window.submitCreateCompliance = submitCreateCompliance;
+window.closeCreateRetentionModal = closeCreateRetentionModal;
+window.submitCreateRetentionPolicy = submitCreateRetentionPolicy;
+window.createComparativeAnalytics = createComparativeAnalytics;
+window.closeCreateDashboardModal = closeCreateDashboardModal;
+window.submitCreateDashboard = submitCreateDashboard;
+window.closeCreateReportModal = closeCreateReportModal;
+window.submitCreateReport = submitCreateReport;
+window.closeCreateRetrainingModal = closeCreateRetrainingModal;
+window.submitCreateRetrainingJob = submitCreateRetrainingJob;
+window.configureRetrainingTrigger = configureRetrainingTrigger;
+window.closeCreateIntegrationModal = closeCreateIntegrationModal;
+window.submitCreateIntegration = submitCreateIntegration;
+window.closeCreateWebhookModal = closeCreateWebhookModal;
+window.submitCreateWebhook = submitCreateWebhook;
+window.createSamplingConfig = createSamplingConfig;
+window.createAggregationConfig = createAggregationConfig;
+window.showSchemaTab = showSchemaTab; 

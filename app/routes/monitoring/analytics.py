@@ -4,12 +4,13 @@ Provides endpoints for time series analysis and comparative analytics
 """
 
 from datetime import datetime
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from fastapi import APIRouter, HTTPException, Query, Body
 import logging
 
 from app.schemas.monitoring import TimeSeriesAnalysis
 from app.services.monitoring_service import monitoring_service
+from app.database import get_session
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["monitoring"])
@@ -38,6 +39,41 @@ async def analyze_time_series_trend(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/analytics/comparative", response_model=List[Dict[str, Any]])
+async def list_comparative_analytics(
+    limit: int = Query(100, description="Maximum number of analytics to return")
+):
+    """List all comparative analytics"""
+    try:
+        async with get_session() as session:
+            from app.models.monitoring import ComparativeAnalyticsDB
+            from sqlalchemy import select, desc
+            
+            stmt = select(ComparativeAnalyticsDB).order_by(desc(ComparativeAnalyticsDB.created_at)).limit(limit)
+            result = await session.execute(stmt)
+            analytics_db = result.scalars().all()
+            
+            return [
+                {
+                    "id": analytics.id,
+                    "comparison_type": analytics.comparison_type,
+                    "comparison_name": analytics.comparison_name,
+                    "entity_ids": analytics.entity_ids,
+                    "entity_types": analytics.entity_types,
+                    "entity_names": analytics.entity_names,
+                    "comparison_metrics": analytics.comparison_metrics,
+                    "time_window_start": analytics.time_window_start.isoformat() if analytics.time_window_start else None,
+                    "time_window_end": analytics.time_window_end.isoformat() if analytics.time_window_end else None,
+                    "created_at": analytics.created_at.isoformat() if analytics.created_at else None,
+                    "created_by": analytics.created_by
+                }
+                for analytics in analytics_db
+            ]
+    except Exception as e:
+        logger.error(f"Error listing comparative analytics: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/analytics/comparative", response_model=Dict[str, str], status_code=201)
 async def create_comparative_analytics(analytics: Dict[str, Any]):
     """Create comparative analytics"""
@@ -58,6 +94,48 @@ async def create_comparative_analytics(analytics: Dict[str, Any]):
         return {"id": analytics_id, "message": "Comparative analytics created successfully"}
     except Exception as e:
         logger.error(f"Error creating comparative analytics: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/analytics/dashboards", response_model=List[Dict[str, Any]])
+async def list_dashboards(
+    is_shared: Optional[bool] = Query(None, description="Filter by shared status"),
+    limit: int = Query(100, description="Maximum number of dashboards to return")
+):
+    """List all custom dashboards"""
+    try:
+        async with get_session() as session:
+            from app.models.monitoring import CustomDashboardDB
+            from sqlalchemy import select, desc
+            
+            stmt = select(CustomDashboardDB)
+            if is_shared is not None:
+                stmt = stmt.where(CustomDashboardDB.is_shared == is_shared)
+            
+            stmt = stmt.order_by(desc(CustomDashboardDB.created_at)).limit(limit)
+            result = await session.execute(stmt)
+            dashboards_db = result.scalars().all()
+            
+            return [
+                {
+                    "id": dashboard.id,
+                    "dashboard_name": dashboard.dashboard_name,
+                    "description": dashboard.description,
+                    "dashboard_config": dashboard.dashboard_config,
+                    "selected_metrics": dashboard.selected_metrics,
+                    "visualization_options": dashboard.visualization_options,
+                    "is_shared": dashboard.is_shared,
+                    "shared_with": dashboard.shared_with,
+                    "auto_refresh_enabled": dashboard.auto_refresh_enabled,
+                    "refresh_interval_seconds": dashboard.refresh_interval_seconds,
+                    "filters": dashboard.filters,
+                    "created_at": dashboard.created_at.isoformat() if dashboard.created_at else None,
+                    "created_by": dashboard.created_by
+                }
+                for dashboard in dashboards_db
+            ]
+    except Exception as e:
+        logger.error(f"Error listing dashboards: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -83,6 +161,53 @@ async def create_custom_dashboard(dashboard: Dict[str, Any]):
         return {"id": dashboard_id, "message": "Custom dashboard created successfully"}
     except Exception as e:
         logger.error(f"Error creating custom dashboard: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/analytics/reports", response_model=List[Dict[str, Any]])
+async def list_reports(
+    is_active: Optional[bool] = Query(None, description="Filter by active status"),
+    report_type: Optional[str] = Query(None, description="Filter by report type"),
+    limit: int = Query(100, description="Maximum number of reports to return")
+):
+    """List all automated reports"""
+    try:
+        async with get_session() as session:
+            from app.models.monitoring import AutomatedReportDB
+            from sqlalchemy import select, desc
+            
+            stmt = select(AutomatedReportDB)
+            if is_active is not None:
+                stmt = stmt.where(AutomatedReportDB.is_active == is_active)
+            if report_type:
+                stmt = stmt.where(AutomatedReportDB.report_type == report_type)
+            
+            stmt = stmt.order_by(desc(AutomatedReportDB.created_at)).limit(limit)
+            result = await session.execute(stmt)
+            reports_db = result.scalars().all()
+            
+            return [
+                {
+                    "id": report.id,
+                    "report_name": report.report_name,
+                    "report_type": report.report_type,
+                    "description": report.description,
+                    "schedule_type": report.schedule_type,
+                    "schedule_config": report.schedule_config,
+                    "report_config": report.report_config,
+                    "included_metrics": report.included_metrics,
+                    "included_models": report.included_models,
+                    "time_window_days": report.time_window_days,
+                    "delivery_method": report.delivery_method,
+                    "recipients": report.recipients,
+                    "is_active": report.is_active,
+                    "created_at": report.created_at.isoformat() if report.created_at else None,
+                    "created_by": report.created_by
+                }
+                for report in reports_db
+            ]
+    except Exception as e:
+        logger.error(f"Error listing reports: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

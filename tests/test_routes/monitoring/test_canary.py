@@ -196,5 +196,103 @@ class TestCanaryAdvanced:
         mock_check.assert_called_once_with(canary_id="canary_123")
 
 
+class TestCanaryGET:
+    """Test canary deployment GET endpoints"""
+    
+    def test_list_canary_deployments(self, client, test_session):
+        """Test listing all canary deployments"""
+        from app.models.monitoring import CanaryDeploymentDB
+        from datetime import datetime
+        
+        # Create test data
+        canary1 = CanaryDeploymentDB(
+            id="canary_1",
+            deployment_name="canary_1",
+            model_id="model_1",
+            production_deployment_id="prod_1",
+            canary_deployment_id="canary_deploy_1",
+            current_traffic_percentage=10.0,
+            target_traffic_percentage=50.0,
+            status="rolling_out",
+            created_at=datetime.utcnow()
+        )
+        canary2 = CanaryDeploymentDB(
+            id="canary_2",
+            deployment_name="canary_2",
+            model_id="model_2",
+            production_deployment_id="prod_2",
+            canary_deployment_id="canary_deploy_2",
+            current_traffic_percentage=0.0,
+            target_traffic_percentage=100.0,
+            status="pending",
+            created_at=datetime.utcnow()
+        )
+        
+        test_session.add(canary1)
+        test_session.add(canary2)
+        test_session.commit()
+        
+        # Test listing all
+        response = client.get("/api/v1/monitoring/canary")
+        assert response.status_code == 200
+        result = response.json()
+        assert len(result) >= 2
+        canary_ids = [c["id"] for c in result]
+        assert "canary_1" in canary_ids
+        assert "canary_2" in canary_ids
+        
+        # Test filtering by status
+        response = client.get("/api/v1/monitoring/canary?status=rolling_out")
+        assert response.status_code == 200
+        result = response.json()
+        assert len(result) >= 1
+        assert all(c["status"] == "rolling_out" for c in result)
+        
+        # Test filtering by model_id
+        response = client.get("/api/v1/monitoring/canary?model_id=model_1")
+        assert response.status_code == 200
+        result = response.json()
+        assert len(result) >= 1
+        assert all(c["model_id"] == "model_1" for c in result)
+        
+        # Test limit
+        response = client.get("/api/v1/monitoring/canary?limit=1")
+        assert response.status_code == 200
+        result = response.json()
+        assert len(result) <= 1
+    
+    def test_get_canary_by_id(self, client, test_session):
+        """Test getting a specific canary deployment by ID"""
+        from app.models.monitoring import CanaryDeploymentDB
+        from datetime import datetime
+        
+        canary = CanaryDeploymentDB(
+            id="canary_get_123",
+            deployment_name="canary_get",
+            model_id="model_get",
+            production_deployment_id="prod_get",
+            canary_deployment_id="canary_deploy_get",
+            current_traffic_percentage=25.0,
+            target_traffic_percentage=100.0,
+            status="rolling_out",
+            created_at=datetime.utcnow()
+        )
+        
+        test_session.add(canary)
+        test_session.commit()
+        
+        # Test getting by ID
+        response = client.get("/api/v1/monitoring/canary/canary_get_123")
+        assert response.status_code == 200
+        result = response.json()
+        assert result["id"] == "canary_get_123"
+        assert result["deployment_name"] == "canary_get"
+        assert result["model_id"] == "model_get"
+        
+        # Test 404 for non-existent
+        response = client.get("/api/v1/monitoring/canary/nonexistent")
+        assert response.status_code == 404
+
+
 
 
